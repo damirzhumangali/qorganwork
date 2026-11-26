@@ -6,7 +6,7 @@ import { colors, Icon } from './ui';
 
 const numberFormat = new Intl.NumberFormat('ru-KZ', { maximumFractionDigits: 0 });
 const dateFormat = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
-const receiptDateFormat = new Intl.DateTimeFormat('en-CA', {
+const almatyDateFormat = new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Asia/Almaty', year: 'numeric', month: '2-digit', day: '2-digit',
 });
 const paymentModes = [['combined', 'Одним платежом'], ['separate', 'Раздельно']];
@@ -42,8 +42,8 @@ function displayDate(value) {
   return date ? dateFormat.format(date) : '—';
 }
 
-function receiptToday() {
-  const parts = Object.fromEntries(receiptDateFormat.formatToParts(new Date()).map(part => [part.type, part.value]));
+function almatyToday() {
+  const parts = Object.fromEntries(almatyDateFormat.formatToParts(new Date()).map(part => [part.type, part.value]));
   return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
@@ -138,13 +138,13 @@ function Status({ status }) {
   </Text>;
 }
 
-function Field({ label, value, onChange, maxLength, disabled, isAmount = false, placeholder }) {
+function Field({ label, value, onChange, maxLength, disabled, isAmount = false, autoCorrect = !isAmount, placeholder }) {
   return <View style={styles.fieldGroup}>
     <Text style={styles.label}>{label}</Text>
     <View style={styles.inputRow}>
       <TextInput accessibilityLabel={isAmount ? `${label}, сумма в тенге` : label}
         value={value} onChangeText={onChange} maxLength={maxLength} editable={!disabled}
-        keyboardType={isAmount ? 'number-pad' : 'default'} autoCorrect={!isAmount}
+        keyboardType={isAmount ? 'number-pad' : 'default'} autoCorrect={autoCorrect}
         placeholder={placeholder ?? (isAmount ? '0' : undefined)} placeholderTextColor={colors.muted}
         style={[styles.input, styles.flex]} />
       {isAmount && <Text style={styles.muted}>₸</Text>}
@@ -322,8 +322,8 @@ function paymentLabel(payment) {
 }
 
 function ReceiptForm({ contract, payment, offline, onCancel, onSave }) {
-  const today = receiptToday();
-  const [receivedOn, setReceivedOn] = useState(receiptToday);
+  const today = almatyToday();
+  const [receivedOn, setReceivedOn] = useState(almatyToday);
   const [enteredAmount, setEnteredAmount] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -379,8 +379,101 @@ function ReceiptForm({ contract, payment, offline, onCancel, onSave }) {
   </>;
 }
 
+function DocumentForm({ contract, item, kind, offline, onCancel, onSave }) {
+  const label = kind === 'avr' ? 'АВР' : 'ЭСФ';
+  const today = almatyToday();
+  const minimum = kind === 'esf' ? item.avr?.issuedOn : undefined;
+  const demoEsf = Boolean(minimum) && contract.number === 'ДЕМО-01' &&
+    process.env.EXPO_PUBLIC_QWORK_DEMO_DOCUMENTS === '1';
+  const [issuedOn, setIssuedOn] = useState(() => demoEsf ? minimum : today);
+  const [number, setNumber] = useState(() => demoEsf ? `ЭСФ-ТЕСТ-${String(item.id).padStart(2, '0')}` : '');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const locked = useRef(false);
+
+  async function submit() {
+    if (offline || locked.current) return;
+    const value = number.trim();
+    if (!value) {
+      setError(`Укажите номер ${label}.`);
+      return;
+    }
+    if (!dateFromDay(issuedOn) || issuedOn > today) {
+      setError('Выберите дату выставления не позднее сегодняшнего дня.');
+      return;
+    }
+    if (minimum && issuedOn < minimum) {
+      setError('Дата ЭСФ должна быть не раньше даты АВР.');
+      return;
+    }
+
+    locked.current = true;
+    setSaving(true);
+    setError('');
+    try {
+      await onSave({ number: value, issuedOn });
+    } catch (failure) {
+      setError(failure.message || `Не удалось сохранить сведения о ${label}.`);
+    } finally {
+      locked.current = false;
+      setSaving(false);
+    }
+  }
+
+  return <>
+    <Button secondary onPress={onCancel} disabled={saving}>‹ К договору</Button>
+    <Section title={`Выставление ${label}`} icon="clipboard">
+      <Text style={styles.label}>Договор {contract.number} · заявка №{item.taskId}</Text>
+      {Boolean(item.taskTitle) && <Text style={styles.muted}>{item.taskTitle}</Text>}
+      {minimum && <Text style={styles.muted}>Дата АВР · {displayDate(minimum)}</Text>}
+      {demoEsf && <Text style={styles.muted}>Тестовые номер и дата подставлены автоматически.</Text>}
+      <Field label={`Номер ${label}`} value={number} maxLength={120} disabled={saving} autoCorrect={false}
+        onChange={value => { setNumber(value); setError(''); }} />
+      <DateField label="Дата выставления" value={issuedOn} minimum={minimum} maximum={today} disabled={saving}
+        onChange={value => { setIssuedOn(value); setError(''); }} />
+      <ErrorText message={error} />
+      {offline && <Text style={styles.muted}>Подключитесь к интернету, чтобы сохранить отметку.</Text>}
+      <Button onPress={submit} disabled={offline || saving}>{saving ? 'Сохраняем…' : `Сохранить ${label}`}</Button>
+    </Section>
+  </>;
+}
+
+function DocumentEntry({ label, document, pending }) {
+  return <View style={styles.documentEntry}>
+    <Text style={styles.label}>{label}</Text>
+    {document ? <>
+      <Text style={styles.muted}>№{document.number} · {displayDate(document.issuedOn)}</Text>
+      {Boolean(document.recordedByName) && <Text style={styles.muted}>Отметил(а) {document.recordedByName}</Text>}
+    </> : <Text style={styles.muted}>{pending}</Text>}
+  </View>;
+}
+
+function ClosingDocuments({ documents, onRecordDocument, disabled }) {
+  return <Section title="Задачи на АВР и ЭСФ" icon="clipboard">
+    {documents.length === 0 && <Text style={styles.muted}>Задачи появятся после приёмки отчётов по договору.</Text>}
+    {documents.map(item => {
+      const next = !item.avr ? 'avr' : !item.esf ? 'esf' : null;
+      const needsAcceptance = next && !item.canRecord;
+      const status = !next ? 'Документы выставлены' : needsAcceptance ? 'Нужна повторная приёмка'
+        : next === 'avr' ? 'Нужно выставить АВР' : 'Нужно выставить ЭСФ';
+      return <View style={styles.installment} key={item.id}>
+        <View style={styles.statusRow}>
+          <Text style={[styles.status, !next && styles.activeStatus]}>{status}</Text>
+        </View>
+        <Text style={styles.label}>Принятая заявка №{item.taskId}</Text>
+        {Boolean(item.taskTitle) && <Text style={styles.muted}>{item.taskTitle}</Text>}
+        <DocumentEntry label="АВР" document={item.avr} pending="Ожидает выставления" />
+        <DocumentEntry label="ЭСФ" document={item.esf} pending={item.avr ? 'Ожидает выставления' : 'После выставления АВР'} />
+        {next && !needsAcceptance && onRecordDocument && <Button secondary disabled={disabled} onPress={() => onRecordDocument(item, next)}>
+          {`Отметить выставление ${next === 'avr' ? 'АВР' : 'ЭСФ'}`}
+        </Button>}
+      </View>;
+    })}
+  </Section>;
+}
+
 function ContractDetails({ contract, objects, offline, activating, refreshing, error, onBack, onEdit, onActivate,
-  onRecordPayment, onRefresh }) {
+  onRecordPayment, onRecordDocument, onRefresh }) {
   const objectNames = new Map(objects.map(object => [String(object.id), object.name]));
   const rows = [...contract.payments].sort((left, right) => left.dueOn.localeCompare(right.dueOn));
   const total = contract.installationAmount + contract.supportAmount;
@@ -414,6 +507,8 @@ function ContractDetails({ contract, objects, offline, activating, refreshing, e
         <AmountLine label="Осталось оплатить" value={contract.outstandingAmount ?? total} />
       </View>
     </Section>
+    {active && Array.isArray(contract.closingDocuments) && <ClosingDocuments documents={contract.closingDocuments}
+      onRecordDocument={onRecordDocument} disabled={busy || offline} />}
     <Section title="График оплаты" icon="calendar">
       <Text style={styles.muted}>{contract.paymentMode === 'combined' ? 'Одним платежом' : 'Раздельные платежи'}</Text>
       {rows.map((payment, index) => {
@@ -460,6 +555,8 @@ export default function ContractsScreen({ request, objects = [], role = 'manager
   const [selected, setSelected] = useState(null);
   const [editing, setEditing] = useState(false);
   const [recordingPayment, setRecordingPayment] = useState(null);
+  const [recordingDocument, setRecordingDocument] = useState(null);
+  const [canIssueDocuments, setCanIssueDocuments] = useState(false);
   const [loading, setLoading] = useState(false);
   const [action, setAction] = useState('');
   const [error, setError] = useState('');
@@ -486,11 +583,12 @@ export default function ContractsScreen({ request, objects = [], role = 'manager
     return () => { current = false; };
   }, [request, offline, listRevision]);
 
-  function updateContract(contract) {
+  function updateContract({ contract, permissions }) {
     setContracts(current => current?.some(item => item.id === contract.id)
       ? current.map(item => item.id === contract.id ? contract : item)
       : [contract, ...(current ?? [])]);
     setSelected(contract);
+    setCanIssueDocuments(Boolean(permissions?.canIssueDocuments));
   }
 
   async function runAction(kind, operation) {
@@ -511,12 +609,13 @@ export default function ContractsScreen({ request, objects = [], role = 'manager
   function openContract(contract) {
     if (offline) {
       setSelected(contract);
+      setCanIssueDocuments(false);
       onNavigate?.();
       return;
     }
     return runAction('open', async () => {
       const result = await request(`/contracts/${encodeURIComponent(contract.id)}`);
-      updateContract(result.contract);
+      updateContract(result);
       onNavigate?.();
     });
   }
@@ -524,15 +623,26 @@ export default function ContractsScreen({ request, objects = [], role = 'manager
   async function saveContract(body) {
     const path = selected ? `/contracts/${encodeURIComponent(selected.id)}` : '/contracts';
     const result = await request(path, { method: selected ? 'PUT' : 'POST', body });
-    updateContract(result.contract);
+    updateContract(result);
     setEditing(false);
     onNavigate?.();
   }
 
   async function saveReceipt(body) {
     const result = await request(`/contracts/${encodeURIComponent(selected.id)}/receipts`, { method: 'POST', body });
-    updateContract(result.contract);
+    updateContract(result);
     setRecordingPayment(null);
+    onNavigate?.();
+  }
+
+  async function saveDocument(body) {
+    const contractId = encodeURIComponent(selected.id);
+    const documentId = encodeURIComponent(recordingDocument.item.id);
+    const result = await request(`/contracts/${contractId}/closing-documents/${documentId}/${recordingDocument.kind}`, {
+      method: 'POST', body,
+    });
+    updateContract(result);
+    setRecordingDocument(null);
     onNavigate?.();
   }
 
@@ -543,7 +653,7 @@ export default function ContractsScreen({ request, objects = [], role = 'manager
         const result = await request(`/contracts/${encodeURIComponent(selected.id)}/activate`, {
           method: 'POST', body: { revision: selected.revision },
         });
-        updateContract(result.contract);
+        updateContract(result);
       }) },
     ]);
   }
@@ -554,11 +664,18 @@ export default function ContractsScreen({ request, objects = [], role = 'manager
   if (recordingPayment) return <ReceiptForm contract={selected} payment={recordingPayment} offline={offline}
     onCancel={() => { setRecordingPayment(null); onNavigate?.(); }} onSave={saveReceipt} />;
 
+  if (recordingDocument) return <DocumentForm contract={selected} {...recordingDocument} offline={offline}
+    onCancel={() => { setRecordingDocument(null); onNavigate?.(); }} onSave={saveDocument} />;
+
   if (selected) return <ContractDetails contract={selected} objects={objects} offline={offline}
     activating={action === 'activate'} refreshing={action === 'open'} error={error}
     onBack={() => { setSelected(null); setError(''); onNavigate?.(); }} onRefresh={() => openContract(selected)}
     onEdit={canManage ? () => { setError(''); setEditing(true); onNavigate?.(); } : undefined}
     onActivate={canManage ? confirmActivation : undefined}
+    onRecordDocument={role === 'accountant' && canIssueDocuments ? (item, kind) => {
+      setRecordingDocument({ item, kind });
+      onNavigate?.();
+    } : undefined}
     onRecordPayment={role === 'accountant' ? payment => { setRecordingPayment(payment); onNavigate?.(); } : undefined} />;
 
   return <>
@@ -633,4 +750,5 @@ const styles = StyleSheet.create({
   balance: { gap: 6, borderRadius: 10, padding: 10, backgroundColor: colors.tint },
   receipts: { gap: 6, paddingTop: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
   receipt: { gap: 2 },
+  documentEntry: { gap: 3, paddingTop: 7, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
 });

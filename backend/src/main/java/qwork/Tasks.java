@@ -234,6 +234,9 @@ final class Tasks {
             changes.before(), changes.after(), changes.reason(), arrival, result, encode(outcome), id);
         if (!status.equals(oldStatus)) {
             recordEvent(db, id, user, status, eventReason, position, occurredAt);
+            if ("done".equals(status)) {
+                ContractClosingDocuments.ensureForAcceptedTask(db, user, id);
+            }
         }
         return taskResponse(db, user, id);
     }

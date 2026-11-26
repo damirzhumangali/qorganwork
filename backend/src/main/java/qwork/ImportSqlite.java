@@ -25,7 +25,7 @@ final class ImportSqlite {
         "work_trip_requests", "work_trip_request_tasks", "task_assignment_changes", "planning_import_runs",
         "push_devices", "incident_push_jobs", "work_trip_offers", "work_trip_offer_history", "work_trip_route_stops",
         "work_trip_actual_expenses", "trip_organizations", "trip_approval_settings", "work_trip_offer_approvals",
-        "work_contracts", "contract_payment_receipts");
+        "work_contracts", "contract_payment_receipts", "contract_closing_document_tasks", "contract_closing_document_marks");
     private static final List<Table> TABLES = List.of(
         new Table("companies", "id code name", ""),
         new Table("trip_organizations", "company_id name_key name", ""),
@@ -57,7 +57,7 @@ final class ImportSqlite {
         new Table("work_trip_offers",
             "id company_id employee_id created_by destination address purpose comment revision created_at",
             "request_id object_id planned_start planned_end daily_rate proposed_at trip_id confirmed_at confirmed_by "
-                + "proposal_estimate declined_at self_requested contract_id"),
+                + "proposal_estimate declined_at self_requested contract_id schedule_from schedule_to"),
         new Table("work_trip_offer_approvals", "offer_id position approver_id reason",
             "decision decided_at decided_revision"),
         new Table("work_trip_offer_history", "offer_id revision kind actor_id happened_at reason",
@@ -65,6 +65,9 @@ final class ImportSqlite {
         new Table("work_trip_route_stops", "id offer_id position destination skip_reason", "planned_at visited_at skipped_at"),
         new Table("work_trip_actual_expenses", "trip_id transport lodging meals other note revision updated_at", ""),
         new Table("work_trip_tasks", "trip_id task_id", ""),
+        new Table("contract_closing_document_tasks", "id contract_id task_id created_at created_by created_by_name", ""),
+        new Table("contract_closing_document_marks",
+            "closing_task_id kind document_number issued_on recorded_at recorded_by recorded_by_name", ""),
         new Table("work_trip_requests", "id company_id employee_id destination purpose planned_start planned_end status reason created_at",
             "trip_id decided_at decided_by estimate"),
         new Table("work_trip_request_tasks", "request_id task_id", ""),
@@ -186,6 +189,7 @@ final class ImportSqlite {
                         resetIdentity(target, table.name());
                     }
                 }
+                counts.merge("contract_closing_document_tasks", (long) ContractClosingDocuments.backfill(target), Long::sum);
                 target.commit();
                 return counts;
             }

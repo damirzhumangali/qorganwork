@@ -4,7 +4,7 @@ import { randomUUID } from 'expo-crypto';
 import { colors, Icon } from './ui';
 import DeadlinePicker, { deadlineToIso } from './DeadlinePicker';
 import { TripBudgetFields, TripBudgetSummary, tripBudgetDraft, tripBudgetPayload } from './TripBudget';
-import { KURMANGAZY_DESTINATIONS, TRIP_CITIES, organizationKey } from './TripDestinations';
+import { KURMANGAZY_DESTINATIONS, TRIP_CITIES, organizationKey, tripSiteLocation } from './TripDestinations';
 import DispatcherTripOffer from './DispatcherTripOffer';
 import { TripOfferCard, TripOfferHistory } from './TripOfferCard';
 import FieldVisitsOverview, { TripOfferPreview } from './FieldVisitsOverview';
@@ -13,6 +13,7 @@ import { contractRouteStops, MAX_TRIP_ORGANIZATIONS, tripFormTemplate, tripPlann
 import { TripActualExpenses } from './TripActualExpenses';
 import { TripApprovalProgress, TripApprovalReview, TripApprovalSettings } from './TripApprovals';
 import TripImport from './TripImport';
+import TripScheduleImport from './TripScheduleImport';
 
 export const TASK_STATUS = {
   assigned: 'Назначена', unassigned: 'Без исполнителя', accepted: 'Принята сотрудником',
@@ -402,6 +403,18 @@ function TripForm({ request, objects = [], onCreated, onCancel, offline = false,
   const canAddOrganization = Boolean(onAddOrganization && !blocked && !busy && !atLimit);
   const selectedObject = objects.find(object => String(object.id) === objectId);
   const selectedContract = contracts.find(contract => String(contract.id) === contractId);
+  const objectsById = new Map(objects.map(object => [String(object.id), object]));
+  const contractPlaces = new Map((selectedContract?.objects ?? []).map(object => {
+    const address = objectsById.get(String(object.id))?.address ?? '';
+    return [String(object.id), { address, ...tripSiteLocation(address) }];
+  }));
+  const contractCities = [...new Set(Array.from(contractPlaces.values(), place => place.city))];
+  const contractRegions = [...new Set(Array.from(contractPlaces.values(), place => place.region).filter(Boolean))];
+  const contractCity = contractCities.length === 1 && contractCities[0] ? contractCities[0]
+    : contractCities.every(city => !city) && template?.contractId === contractId ? template.cityName : '';
+  const contractLocation = [contractCity, ...contractRegions].filter(Boolean).join(' · ');
+  const contractLocationLabel = contractCity && contractRegions.length ? 'Город и область'
+    : contractCity ? 'Город' : contractRegions.length === 1 ? 'Область' : 'Области';
   const manualName = destination.trim();
   let visitNames = [];
   if (placeSource === 'organizations') visitNames = organizations;
@@ -409,7 +422,7 @@ function TripForm({ request, objects = [], onCreated, onCancel, offline = false,
   const withCity = name => cityName ? `${cityName} · ${name}` : name;
   let routeStops;
   if (placeSource === 'contract') {
-    routeStops = contractRouteStops(selectedContract, cityName);
+    routeStops = contractRouteStops(selectedContract, contractCity);
   } else if (placeSource === 'directory' && selectedObject) {
     routeStops = [{ id: `object:${objectId}`, destination: withCity(selectedObject.name) }];
   } else {
@@ -424,7 +437,7 @@ function TripForm({ request, objects = [], onCreated, onCancel, offline = false,
   let place;
   if (placeSource === 'contract' && route.length) {
     place = { contractId, objectIds: route.map(stop => stopsById.get(stop.id).objectId),
-      ...(cityName ? { city: cityName } : {}) };
+      ...(contractCity ? { city: contractCity } : {}) };
   } else if (placeSource === 'directory' && selectedObject) {
     place = { objectId, scheduleVisit: true, ...(cityName ? { city: cityName } : {}) };
   } else if (route.length) {
@@ -545,19 +558,31 @@ function TripForm({ request, objects = [], onCreated, onCancel, offline = false,
           </Text>}
           <Notice message={templateAction.error} />
         </View>}
-        <Text style={styles.label}>Город</Text>
-        <VisitOptionPicker label="Выбрать город" icon="pin" options={TRIP_CITY_OPTIONS}
-          selected={cityName || undefined} onSelect={setCityName} disabled={busy} visibleLimit={TRIP_CITY_OPTIONS.length} />
+        {placeSource !== 'contract' && <>
+          <Text style={styles.label}>Город</Text>
+          <VisitOptionPicker label="Выбрать город" icon="pin" options={TRIP_CITY_OPTIONS}
+            selected={cityName || undefined} onSelect={setCityName} disabled={busy} visibleLimit={TRIP_CITY_OPTIONS.length} />
+        </>}
         {placeSource === 'contract' ? <>
           <Text style={styles.label}>Договор и объекты</Text>
           <VisitOptionPicker label="Выбрать договор" icon="clipboard" selected={contractId} onSelect={chooseContract}
             disabled={busy} empty="Нет действующих договоров с объектами."
             options={contracts.map(contract => ({ id: String(contract.id), label: `Договор ${contract.number}` }))} />
           {selectedContract ? <View style={styles.inset}>
+            {contractLocation ? <>
+              <Text style={styles.label}>{contractLocationLabel}</Text>
+              <Text style={styles.body}>{contractLocation}</Text>
+            </> : null}
             <Text style={styles.label}>Объекты из договора · {routeStops.length}</Text>
-            {routeStops.map(stop => <Text key={stop.id} numberOfLines={2} style={styles.body}>
-              {stop.name}
-            </Text>)}
+            {routeStops.map(stop => {
+              const address = contractPlaces.get(stop.objectId)?.address;
+              return <View key={stop.id}>
+                <Text numberOfLines={2} style={styles.body}>{stop.name}</Text>
+                {address && address !== contractLocation ? <Text style={styles.muted}>{address}</Text> : null}
+              </View>;
+            })}
+            {!contractLocation && !Array.from(contractPlaces.values()).some(place => place.address) &&
+              <Text style={styles.muted}>Адреса объектов пока не указаны в справочнике.</Text>}
           </View> : <Text style={styles.muted}>Выберите договор, и его объекты появятся в маршруте.</Text>}
           <View style={styles.choices}>
             <Button disabled={busy} onPress={() => setPlaceSource('organizations')}>Указать другое место</Button>
@@ -919,13 +944,15 @@ function TripReport({ id, request, offline, employee, canEditBudget, onTask, onB
 
 function TripsPanel({ request, employee = false, tasks = [], offline = false, onTask,
   id, setId, initialOfferId = null, initialRequestId = null, canEditBudget = false, canDispatch = false,
-  filter, onFilter, onControl, onCreateTask, sampleStaff }) {
+  filter, onFilter, onControl, onCreateTask, sampleStaff, employees = [] }) {
   const list = useResource(request, '/trips', offline);
   const requests = useResource(request, '/trip-requests', offline);
   const offers = useResource(request, '/trip-offers', offline);
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
   const [configuring, setConfiguring] = useState(false);
+  const scheduleImport = importing && !employee && canDispatch;
+  const importDestinations = useResource(request, '/trip-destinations', offline || !scheduleImport);
   const selfService = offers.value?.supportsTripSelfService === true;
   const approval = useResource(request, '/trip-approval-settings', offline || !selfService || (!employee && !configuring));
   const [offerId, setOfferId] = useState(initialOfferId);
@@ -979,7 +1006,7 @@ function TripsPanel({ request, employee = false, tasks = [], offline = false, on
   if (offerId) {
     const selfDraft = chosenOffer?.selfRequested && chosenOffer.status === 'awaiting_employee';
     const Details = chosenOffer?.selfRequested && !selfDraft ? TripApprovalReview
-      : employee ? TripOfferCard : DispatcherTripOffer;
+      : employee || selfDraft ? TripOfferCard : DispatcherTripOffer;
     return chosenOffer ? <Details key={offerId} offer={chosenOffer} employee={employee} request={request}
       offline={offline} canDispatch={canDispatch} onChanged={changeOffer} onTrip={openConfirmedTrip}
       approvalSettings={approval.value} approvalSettingsError={approval.error}
@@ -1020,6 +1047,22 @@ function TripsPanel({ request, employee = false, tasks = [], offline = false, on
     <View style={styles.choices}><Button onPress={() => setImporting(false)}>‹ К командировкам</Button></View>
     <TripImport request={request} offline={offline} onImported={offers.reload} />
   </View>;
+  if (scheduleImport) {
+    const catalog = new Map((importDestinations.value?.objects ?? []).map(object => [object.id, object]));
+    const contracts = (importDestinations.value?.contracts ?? []).map(contract => ({
+      ...contract,
+      objects: contract.objects.map(object => catalog.get(object.id) ?? object),
+    }));
+    const loadError = importDestinations.error;
+    return <View style={styles.screen}>
+      <View style={styles.choices}><Button onPress={() => setImporting(false)}>‹ К командировкам</Button></View>
+      <Notice message={loadError} />
+      {loadError && <Button disabled={offline} onPress={importDestinations.reload}>Обновить справочник</Button>}
+      {importDestinations.value ? <TripScheduleImport request={request}
+        offline={offline} employees={employees} contracts={contracts} Picker={VisitOptionPicker}
+        onImported={offers.reload} /> : !loadError && <Text style={styles.muted}>Загружаем договоры…</Text>}
+    </View>;
+  }
   if (configuring && !employee) return <TripApprovalSettings settings={approval.value} loadError={approval.error}
     offline={offline} request={request} onSaved={result => approval.applyUpdate(() => result)}
     onBack={() => setConfiguring(false)} OptionPicker={VisitOptionPicker} />;
@@ -1032,7 +1075,8 @@ function TripsPanel({ request, employee = false, tasks = [], offline = false, on
       onTask={onTask && (taskId => onTask(taskId, { view: filter }))} onTrip={setId} onOffer={setOfferId} onRequest={setRequestId}
       onCreateTask={onCreateTask} onCreateTrip={employee ? () => setCreating(true) : undefined}
       createTripDisabled={!canCreateTrip} tripCreateHint={tripCreateHint}
-      onImportTrip={employee && selfService && offers.value?.supportsTripImport === true ? () => {
+      onImportTrip={(employee && selfService && offers.value?.supportsTripImport === true)
+        || (!employee && canDispatch && offers.value?.supportsTripScheduleImport === true) ? () => {
         onFilter('trips');
         setImporting(true);
       } : undefined} importTripDisabled={offline}
@@ -1056,7 +1100,7 @@ export function EmployeeTrips({ request, offline = false, onTask, tasks = [], in
     tasks={tasks} filter={filter} onFilter={setFilter} initialOfferId={initialOfferId} initialRequestId={initialRequestId} />;
 }
 
-export function OfficeFieldOperations({ request, tasks = [],
+export function OfficeFieldOperations({ request, tasks = [], employees = [],
   onTask, onCreateTask, initialTab = 'all', initialTripId = null, onTabChange, sampleStaff }) {
   const [filter, setFilter] = useState(initialTab === 'board' ? 'all' : initialTab);
   const [control, setControl] = useState(initialTab === 'board' && !initialTripId);
@@ -1077,7 +1121,7 @@ export function OfficeFieldOperations({ request, tasks = [],
   </View>;
 
   return <TripsPanel request={request} tasks={tasks} id={id} setId={setId} onTask={onTask} canEditBudget canDispatch
-    filter={filter} onFilter={selectFilter} sampleStaff={sampleStaff} onCreateTask={onCreateTask}
+    filter={filter} onFilter={selectFilter} sampleStaff={sampleStaff} onCreateTask={onCreateTask} employees={employees}
     onControl={() => { setControl(true); onTabChange?.('board'); }} />;
 }
 

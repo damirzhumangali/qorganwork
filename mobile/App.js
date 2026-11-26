@@ -229,7 +229,7 @@ function AccountantContracts({ request }) {
       keyboardShouldPersistTaps="handled">
       <View style={styles.pageIntro}>
         <Text accessibilityRole="header" style={styles.pageTitle}>Договоры</Text>
-        <Text style={styles.muted}>График оплаты и поступления от заказчиков</Text>
+        <Text style={styles.muted}>АВР, ЭСФ, график оплаты и поступления</Text>
       </View>
       <ContractsScreen role="accountant" request={request} onNavigate={scrollToTop} />
     </ScrollView>

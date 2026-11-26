@@ -203,6 +203,10 @@ final class XlsxImport {
     }
 
     static Sheet readPayload(Map<String, Object> payload) {
+        return readPayload(payload, MAX_ROWS);
+    }
+
+    static Sheet readPayload(Map<String, Object> payload, int maxRows) {
         if (!(payload.get("base64") instanceof String encoded) || encoded.length() > ((MAX_BYTES + 2) / 3) * 4) {
             throw Domain.error(400, "Прикрепите файл Excel .xlsx размером до 2 МБ.");
         }
@@ -210,7 +214,7 @@ final class XlsxImport {
         try {
             byte[] bytes = Base64.getDecoder().decode(encoded);
             if (bytes.length > MAX_BYTES) throw new IOException();
-            sheet = read(bytes);
+            sheet = read(bytes, maxRows);
         } catch (IOException | IllegalArgumentException | SAXException | ParserConfigurationException ex) {
             throw Domain.error(400, "Не удалось прочитать файл Excel. Сохраните его в формате .xlsx и попробуйте снова.");
         }
@@ -311,7 +315,7 @@ final class XlsxImport {
         return number;
     }
 
-    private static LocalDate excelDate(long days, boolean dates1904) {
+    static LocalDate excelDate(long days, boolean dates1904) {
         if (days < 0 || days > 2_958_465 || (!dates1904 && days == 60)) throw new IllegalArgumentException();
         LocalDate epoch = dates1904 ? LocalDate.of(1904, 1, 1) : LocalDate.of(1899, 12, 31);
         return epoch.plusDays(!dates1904 && days > 60 ? days - 1 : days);
@@ -332,7 +336,7 @@ final class XlsxImport {
         }
     }
 
-    private static Sheet read(byte[] bytes) throws IOException, ParserConfigurationException, SAXException {
+    private static Sheet read(byte[] bytes, int maxRows) throws IOException, ParserConfigurationException, SAXException {
         var parts = new HashMap<String, byte[]>();
         try (var zip = new ZipInputStream(new ByteArrayInputStream(bytes))) {
             int remaining = MAX_EXPANDED_BYTES;
@@ -397,7 +401,8 @@ final class XlsxImport {
             }
             if (!cells.isEmpty()) {
                 rows.add(new SheetRow(number, cells));
-                if (rows.size() > MAX_ROWS + 1) throw Domain.error(400, "В одном файле можно импортировать до 200 строк.");
+                if (rows.size() > maxRows + 1) throw Domain.error(400,
+                    "В одном файле можно импортировать до " + maxRows + " строк.");
             }
         }
         return new Sheet(rows, dates1904);

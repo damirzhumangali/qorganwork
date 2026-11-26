@@ -66,12 +66,14 @@ function RouteButton({ children, label, onPress, primary, disabled }) {
 }
 
 function StopHeading({ index, destination, multiple }) {
-  const { city, name } = splitTripDestination(destination);
+  const { city, region, name, address } = splitTripDestination(destination);
+  const location = [city, region].filter(Boolean).join(' · ');
   return <View style={styles.heading}>
     {multiple && <Text style={styles.index}>{index + 1}</Text>}
     <View style={styles.stopTitle}>
-      {city ? <Text style={styles.muted}>{city}</Text> : null}
+      {location ? <Text style={styles.muted}>{location}</Text> : null}
       <Text accessibilityRole="header" numberOfLines={2} ellipsizeMode="tail" style={styles.stopName}>{name}</Text>
+      {address && address !== location ? <Text style={styles.muted}>{address}</Text> : null}
     </View>
   </View>;
 }

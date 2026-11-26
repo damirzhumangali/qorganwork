@@ -1,5 +1,6 @@
 package qwork;
 
+import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.ArrayList;
@@ -31,6 +32,7 @@ final class TripOffers {
             revision INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL,
             self_requested INTEGER NOT NULL DEFAULT 0 CHECK (self_requested IN (0, 1)),
             contract_id INTEGER REFERENCES work_contracts(id),
+            schedule_from TEXT, schedule_to TEXT,
             UNIQUE (company_id, created_by, request_id),
             CHECK ((planned_start IS NULL) = (planned_end IS NULL)),
             CHECK ((planned_start IS NULL) = (daily_rate IS NULL)),
@@ -81,12 +83,14 @@ final class TripOffers {
         long company = number(user, "company_id");
         boolean employee = Trips.isEmployee(user);
         if (!employee) Accounts.requireManager(user);
-        String scope = employee ? " AND r.employee_id = ?" : " AND (r.self_requested = 0 OR r.planned_start IS NOT NULL)";
+        String scope = employee ? " AND r.employee_id = ?"
+            : " AND (r.self_requested = 0 OR r.planned_start IS NOT NULL OR r.schedule_from IS NOT NULL)";
         Object[] parameters = employee ? new Object[] {company, number(user, "id")} : new Object[] {company};
         var rows = Db.rows(db, SELECT + scope + " ORDER BY r.created_at DESC, r.id DESC", parameters);
         return Map.of("offers", details(db, user, rows, scope, parameters), "supportsTripRoutes", true,
             "supportsSingleStopRoutes", true, "supportsTripImport", true,
             "supportsTripOrganizations", true, "supportsTripObjectCity", true, "supportsTripSelfService", true,
+            "supportsTripScheduleImport", true,
             "organizations", TripOrganizations.list(db, user));
     }
 
@@ -108,8 +112,26 @@ final class TripOffers {
 
     static long createDraft(Connection db, Map<String, Object> user, Map<String, Object> body) throws SQLException {
         requireEmployee(user);
+        return createDraft(db, user, body, number(user, "id"), null);
+    }
+
+    static long createScheduleDraft(Connection db, Map<String, Object> user, Map<String, Object> body,
+                                    long employee, long contract, TripScheduleImport.Period period) throws SQLException {
+        String key = "trip-schedule-v1/" + employee + "/" + contract + "/" + period.from() + "/" + period.to();
+        if (!(body.get("objectIds") instanceof List<?> objectIds)) {
+            throw error(400, "Выберите объекты договора.");
+        }
+        var assignment = Map.of("requestId", UUID.nameUUIDFromBytes(key.getBytes(StandardCharsets.UTF_8)).toString(),
+            "contractId", contract, "objectIds", objectIds,
+            "purpose", field(body, "purpose", "Что нужно сделать", 1000, false),
+            "comment", field(body, "comment", "Комментарий", 1000, true));
+        return createDraft(db, user, assignment, employee, period);
+    }
+
+    private static long createDraft(Connection db, Map<String, Object> user, Map<String, Object> body,
+                                    long employee, TripScheduleImport.Period period) throws SQLException {
         long company = number(user, "company_id");
-        long employee = number(user, "id");
+        long creator = number(user, "id");
         String requestId = requestId(body);
         if (!(body.getOrDefault("scheduleVisit", false) instanceof Boolean scheduleVisit)) {
             throw error(400, "Проверьте настройку времени посещения.");
@@ -121,7 +143,9 @@ final class TripOffers {
             if (scheduleVisit || body.get("objectId") != null || body.containsKey("destinations") || body.containsKey("destination")) {
                 throw error(400, "Для командировки по договору используются его объекты.");
             }
-            destinations = Contracts.tripDestinations(db, company, contractId, body.get("objectIds"), city);
+            destinations = period == null
+                ? Contracts.tripDestinations(db, company, contractId, body.get("objectIds"), city)
+                : Contracts.tripScheduleDestinations(db, company, contractId, body.get("objectIds"));
         } else {
             if (body.containsKey("objectIds")) throw error(400, "Выберите договор для этих объектов.");
             destinations = TripRoutes.destinations(body);
@@ -143,23 +167,33 @@ final class TripOffers {
         String purpose = field(body, "purpose", "Что нужно сделать", 1000, false);
         String comment = field(body, "comment", "Комментарий", 1000, true);
         Trips.lockEmployee(db, company, employee);
-        var inserted = Db.one(db, """
-            INSERT INTO work_trip_offers(company_id, employee_id, created_by, request_id,
-                destination, object_id, address, purpose, comment, created_at, self_requested, contract_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
-            ON CONFLICT (company_id, created_by, request_id) DO NOTHING RETURNING id
-            """, company, employee, employee, requestId, destination.name(), destination.objectId(),
-            destination.address(), purpose, comment, Trips.now(), contractId);
-        if (inserted != null) {
-            long offerId = number(inserted, "id");
-            TripRoutes.add(db, offerId, destinations);
-            return offerId;
+        String scheduleFrom = period == null ? null : period.from().toString();
+        String scheduleTo = period == null ? null : period.to().toString();
+        var existing = period == null ? null : Db.one(db, SELECT + """
+             AND r.employee_id = ? AND r.contract_id = ? AND r.schedule_from = ? AND r.schedule_to = ?
+            """, company, employee, contractId, scheduleFrom, scheduleTo);
+        if (existing == null) {
+            var inserted = Db.one(db, """
+                INSERT INTO work_trip_offers(company_id, employee_id, created_by, request_id,
+                    destination, object_id, address, purpose, comment, created_at, self_requested, contract_id,
+                    schedule_from, schedule_to)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+                ON CONFLICT (company_id, created_by, request_id) DO NOTHING RETURNING id
+                """, company, employee, creator, requestId, destination.name(), destination.objectId(),
+                destination.address(), purpose, comment, Trips.now(), contractId, scheduleFrom, scheduleTo);
+            if (inserted != null) {
+                long offerId = number(inserted, "id");
+                TripRoutes.add(db, offerId, destinations);
+                return offerId;
+            }
+            existing = Db.one(db, SELECT + " AND r.created_by = ? AND r.request_id = ?", company, creator, requestId);
         }
 
-        var existing = Db.one(db, SELECT + " AND r.created_by = ? AND r.request_id = ?", company, employee, requestId);
         if (existing == null || !selfRequested(existing) || number(existing, "employee_id") != employee
                 || !Objects.equals(Objects.toString(existing.get("contract_id"), null), Objects.toString(contractId, null))
                 || !Objects.equals(Objects.toString(existing.get("object_id"), null), Objects.toString(destination.objectId(), null))
+                || !Objects.equals(existing.get("schedule_from"), scheduleFrom)
+                || !Objects.equals(existing.get("schedule_to"), scheduleTo)
                 || !destination.name().equals(existing.get("destination")) || !destination.address().equals(existing.get("address"))
                 || !purpose.equals(existing.get("purpose")) || !comment.equals(existing.get("comment"))
                 || !TripRoutes.matchesAssignment(db, number(existing, "id"), destinations)) {
@@ -467,6 +501,8 @@ final class TripOffers {
         out.put("objectId", Objects.toString(row.get("object_id"), null));
         out.put("contractId", Objects.toString(row.get("contract_id"), null));
         out.put("contractNumber", row.get("contract_number"));
+        out.put("scheduleFrom", row.get("schedule_from"));
+        out.put("scheduleTo", row.get("schedule_to"));
         out.put("purpose", row.get("purpose"));
         out.put("comment", row.get("comment"));
         out.put("stops", route);

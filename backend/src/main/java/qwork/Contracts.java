@@ -106,7 +106,7 @@ final class Contracts {
 
     static Map<String, Object> detail(Connection db, Map<String, Object> user, long id) throws SQLException {
         requireContractReader(user);
-        return detail(db, find(db, number(user, "company_id"), id, false));
+        return detail(db, user, find(db, number(user, "company_id"), id, false));
     }
 
     static List<Map<String, Object>> tripSources(Connection db, long company, List<Map<String, Object>> sites)
@@ -152,13 +152,51 @@ final class Contracts {
         return destinations;
     }
 
+    static List<String> tripScheduleDestinations(Connection db, long company, long contractId, Object input)
+            throws SQLException {
+        var contract = Db.one(db, """
+            SELECT object_ids FROM work_contracts WHERE company_id = ? AND id = ? AND status = 'active'
+            """, company, contractId);
+        if (contract == null) throw error(404, "Действующий договор не найден.");
+        var ids = storedObjectIds(contract);
+        if (!(input instanceof List<?> route) || route.isEmpty() || route.size() > 30
+                || new HashSet<>(route).size() != route.size() || !ids.containsAll(route)) {
+            throw error(400, "Выберите до 30 разных объектов действующего договора.");
+        }
+
+        var sites = new HashMap<String, Map<String, Object>>();
+        for (var site : Db.rows(db, "SELECT id, name, address FROM work_sites WHERE company_id = ?", company)) {
+            sites.put(site.get("id").toString(), site);
+        }
+        if (!sites.keySet().containsAll(route)) throw error(409, "Объекты договора недоступны.");
+        var names = new HashSet<String>();
+        boolean duplicateNames = route.stream().anyMatch(id -> !names.add(
+            ((String) sites.get(id).get("name")).replaceAll("\\s+", " ").strip().toLowerCase(Locale.ROOT)));
+        var destinations = new ArrayList<String>();
+        for (var id : route) {
+            var site = sites.get(id);
+            String name = ((String) site.get("name")).replaceAll("\\s+", " ").strip();
+            if (duplicateNames) name += " · объект №" + id;
+            String address = ((String) site.get("address")).replaceAll("\\s+", " ").strip();
+            int addressLimit = 299 - name.codePointCount(0, name.length());
+            if (address.codePointCount(0, address.length()) > addressLimit) {
+                int cut = address.offsetByCodePoints(0, addressLimit);
+                int boundary = address.lastIndexOf(' ', cut);
+                address = address.substring(0, boundary > 0 ? boundary : cut).stripTrailing();
+            }
+            destinations.add(address.isEmpty() ? name : name + "\n" + address);
+        }
+        return destinations;
+    }
+
     private static Map<String, String> siteNames(List<Map<String, Object>> sites) {
         var names = new HashMap<String, String>();
         for (var site : sites) names.put(site.get("id").toString(), (String) site.get("name"));
         return names;
     }
 
-    private static Map<String, Object> detail(Connection db, Map<String, Object> row) throws SQLException {
+    private static Map<String, Object> detail(Connection db, Map<String, Object> user, Map<String, Object> row)
+            throws SQLException {
         var totals = new HashMap<Integer, Long>();
         var history = new HashMap<Integer, List<Map<String, Object>>>();
         for (var receipt : Db.rows(db, """
@@ -176,7 +214,10 @@ final class Contracts {
                 "recordedBy", Map.of("id", receipt.get("recorded_by").toString(), "name", receipt.get("recorded_by_name"))
             ));
         }
-        return Map.of("contract", json(row, totals, history));
+        var contract = json(row, totals, history);
+        contract.put("closingDocuments", ContractClosingDocuments.list(db, number(row, "company_id"), number(row, "id")));
+        return Map.of("contract", contract, "permissions", Map.of(
+            "canIssueDocuments", Accounts.isAccountant(user) && "active".equals(row.get("status"))));
     }
 
     static Map<String, Object> create(Connection db, Map<String, Object> user, Map<String, Object> body)
@@ -224,7 +265,7 @@ final class Contracts {
         long company = number(user, "company_id");
         var row = find(db, company, id, true);
         long revision = revision(body);
-        if ("active".equals(row.get("status"))) return detail(db, row);
+        if ("active".equals(row.get("status"))) return detail(db, user, row);
         requireRevision(row, revision);
         Db.update(db, """
             UPDATE work_contracts SET status = 'active', revision = revision + 1 WHERE company_id = ? AND id = ?
@@ -260,7 +301,7 @@ final class Contracts {
                 throw error(409, "Эта операция уже использована для другого поступления.",
                     "contract_receipt_request_conflict");
             }
-            return detail(db, row);
+            return detail(db, user, row);
         }
 
         long paid = number(Db.one(db, """
@@ -276,7 +317,14 @@ final class Contracts {
                 contract_id, payment_index, request_id, amount, received_on, created_at, recorded_by, recorded_by_name)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, id, index, requestId, amount, receivedOn, Instant.now().toString(), actor, user.get("name"));
-        return detail(db, row);
+        return detail(db, user, row);
+    }
+
+    static Map<String, Object> recordClosingDocument(Connection db, Map<String, Object> user, long id,
+                                                       long documentId, String kind, Map<String, Object> body)
+            throws SQLException {
+        ContractClosingDocuments.record(db, user, id, documentId, kind, body);
+        return detail(db, user, id);
     }
 
     private static void requireContractReader(Map<String, Object> user) {

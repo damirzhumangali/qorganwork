@@ -3,6 +3,7 @@ import { Keyboard, Pressable, StyleSheet, Text, TextInput, View } from 'react-na
 import DeadlinePicker, { deadlineToIso } from './DeadlinePicker';
 import { TripBudgetFields, TripBudgetSummary, tripBudgetDraft, tripBudgetPayload, tripBudgetTotals } from './TripBudget';
 import { TripRouteEditor, TripRouteSummary, tripRouteTitle, validTripRoute } from './TripRoute';
+import { splitTripDestination } from './TripDestinations';
 import { colors, Icon } from './ui';
 
 const statusLabels = {
@@ -18,6 +19,7 @@ const historyLabels = {
   confirmed: 'Руководитель подтвердил поездку',
 };
 const dateAndTime = new Intl.DateTimeFormat('ru-RU', { dateStyle: 'medium', timeStyle: 'short' });
+const scheduleDate = new Intl.DateTimeFormat('ru-RU', { dateStyle: 'medium', timeZone: 'UTC' });
 
 export function useTripOfferAction(offer, request, onChanged) {
   const [latest, setLatest] = useState(null);
@@ -108,11 +110,13 @@ export function TripOfferHistory({ history }) {
   </View>;
 }
 
-function draftFrom(proposal, key, stops) {
+function draftFrom(proposal, key, stops, schedule) {
   return {
     key,
-    start: proposal?.plannedStart ? new Date(proposal.plannedStart) : null,
-    end: proposal?.plannedEnd ? new Date(proposal.plannedEnd) : null,
+    start: proposal?.plannedStart ? new Date(proposal.plannedStart)
+      : schedule?.scheduleFrom ? new Date(schedule.scheduleFrom + 'T09:00:00') : null,
+    end: proposal?.plannedEnd ? new Date(proposal.plannedEnd)
+      : schedule?.scheduleTo ? new Date(schedule.scheduleTo + 'T18:00:00') : null,
     budget: tripBudgetDraft(proposal?.estimate ?? proposal),
     route: stops.map(stop => ({ id: stop.id, plannedAt: stop.plannedAt })),
   };
@@ -137,7 +141,10 @@ export function TripOfferCard({ offer, request, employee, offline = false, onCha
     && (current.status === 'awaiting_employee' || isEditing);
   const draftKey = current.status === 'awaiting_employee'
     ? 'new-' + current.revision : 'edit-' + editing?.revision;
-  const initialDraft = draftFrom(current.previousProposal, draftKey, stops);
+  const initialDraft = draftFrom(current.previousProposal, draftKey, stops, current);
+  const fromSchedule = Boolean(current.scheduleFrom && current.scheduleTo);
+  const place = splitTripDestination(stops[0]?.destination ?? current.destination);
+  const address = current.address || (stops.length < 2 ? place.address : '');
   const draft = savedDraft?.key === draftKey ? savedDraft : initialDraft;
   const plannedStart = deadlineToIso(draft.start);
   const plannedEnd = deadlineToIso(draft.end);
@@ -203,20 +210,25 @@ export function TripOfferCard({ offer, request, employee, offline = false, onCha
         <View style={styles.heading}>
           <View style={styles.placeIcon}><Icon name="pin" /></View>
           <View style={styles.headingText}>
-            <Text style={styles.muted}>{selfDraft ? 'Черновик из Excel' : 'Командировка от руководителя'}</Text>
+            <Text style={styles.muted}>{fromSchedule ? 'По графику выездов'
+              : selfDraft ? 'Черновик из Excel' : 'Командировка от руководителя'}</Text>
             <Text accessibilityRole="header" style={styles.title}>
-              {tripRouteTitle(stops) ?? stops[0]?.destination ?? current.destination}
+              {tripRouteTitle(stops) ?? (fromSchedule ? place.name : stops[0]?.destination ?? current.destination)}
             </Text>
-            {current.address && current.address !== current.destination ? <Text style={styles.muted}>{current.address}</Text> : null}
+            {address && address !== current.destination ? <Text style={styles.muted}>{address}</Text> : null}
           </View>
         </View>
         <Text accessibilityLiveRegion="polite" style={[styles.badge, current.status === 'confirmed' && styles.confirmedBadge]}>
           {selfDraft ? 'Черновик' : returned ? 'На уточнении' : statusLabels[current.status]}
         </Text>
+        {current.contractNumber ? <Text style={styles.muted}>Договор {current.contractNumber}</Text> : null}
+        {fromSchedule ? <Text style={styles.muted}>
+          {[...new Set([current.scheduleFrom, current.scheduleTo])].map(day => scheduleDate.format(new Date(day))).join(' — ')}
+        </Text> : null}
         <Text style={styles.label}>Что нужно сделать</Text>
         <Text style={styles.description}>{current.purpose}</Text>
         {current.comment ? <>
-          <Text style={styles.label}>{selfDraft ? 'Ваш комментарий' : 'Комментарий руководителя'}</Text>
+          <Text style={styles.label}>{selfDraft && !fromSchedule ? 'Ваш комментарий' : 'Комментарий руководителя'}</Text>
           <Text style={styles.description}>{current.comment}</Text>
         </> : null}
         {returned ? <>
@@ -232,7 +244,8 @@ export function TripOfferCard({ offer, request, employee, offline = false, onCha
       {showProposal ? (
         <View style={styles.card}>
           <Text accessibilityRole="header" style={styles.title}>Ваши условия поездки</Text>
-          <Text style={styles.muted}>{selfDraft ? 'Добавьте даты, время посещений и расходы, затем отправьте черновик на согласование.'
+          <Text style={styles.muted}>{fromSchedule ? 'Проверьте период поездки, укажите время посещений и расходы.'
+            : selfDraft ? 'Добавьте даты, время посещений и расходы, затем отправьте черновик на согласование.'
             : 'Руководитель получит ваш график и дневную ставку на согласование.'}</Text>
           <Text accessibilityRole="header" style={styles.label}>Период командировки</Text>
           <Text style={styles.muted}>Когда начинается и заканчивается вся поездка.</Text>

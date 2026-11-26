@@ -161,6 +161,9 @@ final class Trips {
         if (linked.size() + newIds.size() > 50) throw error(400, "К командировке можно привязать до 50 заявок.");
         validateTasks(db, company, employee, newIds);
         addTaskLinks(db, id, newIds);
+        for (long taskId : newIds) {
+            ContractClosingDocuments.ensureForAcceptedTask(db, user, taskId);
+        }
         return report(db, user, id);
     }
 

@@ -35,7 +35,8 @@ final class Db {
         "0020_trip_budgets.sql", "0021_task_schedule.sql", "0022_trip_offers.sql",
         "0023_trip_offer_history.sql", "0024_trip_route.sql", "0025_trip_actual_expenses.sql",
         "0026_trip_organizations.sql", "0027_unified_manager_role.sql", "0028_trip_approvals.sql",
-        "0029_contracts.sql", "0030_contract_payment_receipts.sql", "0031_accountant_role.sql", "0032_trip_contracts.sql"
+        "0029_contracts.sql", "0030_contract_payment_receipts.sql", "0031_accountant_role.sql", "0032_trip_contracts.sql",
+        "0033_contract_closing_documents.sql"
     );
     private static final String LEGACY_SQLITE_ROLE_CHECK = "CHECK (role IN ('employee', 'dispatcher', 'manager'))";
     private static final String SQLITE_ROLE_CHECK = "CHECK (role IN ('employee', 'dispatcher', 'manager', 'accountant'))";
@@ -180,7 +181,8 @@ final class Db {
                         + RepresentativeReviews.SQLITE_SCHEMA + Trips.SQLITE_SCHEMA + TripRequests.SQLITE_SCHEMA
                         + IncidentPush.SQLITE_SCHEMA + TripOffers.SQLITE_SCHEMA + TripRoutes.SQLITE_SCHEMA
                         + TripActualExpenses.SQLITE_SCHEMA + TripOrganizations.SQLITE_SCHEMA
-                        + TripApprovals.SQLITE_SCHEMA + Contracts.SQLITE_SCHEMA).split(";")) {
+                        + TripApprovals.SQLITE_SCHEMA + Contracts.SQLITE_SCHEMA
+                        + ContractClosingDocuments.SQLITE_SCHEMA).split(";")) {
                     if (!sql.isBlank()) {
                         statement.execute(sql);
                     }
@@ -218,7 +220,14 @@ final class Db {
             ));
             addMissingColumns(db, "work_trip_requests", Map.of("estimate", "TEXT"));
             addMissingColumns(db, "work_trip_offers", Map.of("proposal_estimate", "TEXT", "declined_at", "TEXT",
-                "self_requested", "INTEGER NOT NULL DEFAULT 0", "contract_id", "INTEGER REFERENCES work_contracts(id)"));
+                "self_requested", "INTEGER NOT NULL DEFAULT 0", "contract_id", "INTEGER REFERENCES work_contracts(id)",
+                "schedule_from", "TEXT", "schedule_to", "TEXT"));
+            update(db, """
+                CREATE UNIQUE INDEX IF NOT EXISTS work_trip_offers_by_schedule
+                ON work_trip_offers(company_id, employee_id, contract_id, schedule_from, schedule_to)
+                WHERE schedule_from IS NOT NULL
+                """);
+            ContractClosingDocuments.backfill(db);
             FieldWork.initSqlite(db);
             Sync.initSqlite(db);
             update(db, """

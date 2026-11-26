@@ -11,6 +11,7 @@ const shortNames = new Map(KURMANGAZY_DESTINATIONS.map(place => [place.label, pl
 const dateTime = new Intl.DateTimeFormat('ru-RU', {
   day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
 });
+const dateOnly = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short', timeZone: 'UTC' });
 const money = new Intl.NumberFormat('ru-KZ', { style: 'currency', currency: 'KZT', maximumFractionDigits: 0 });
 
 function time(value) {
@@ -29,8 +30,8 @@ function period(start, end) {
 
 function tripPlace(destination, stops = []) {
   const routeTitle = tripRouteTitle(stops);
-  const { city, name } = splitTripDestination(destination);
-  return { title: routeTitle ?? shortNames.get(name) ?? name, place: city };
+  const { city, region, name } = splitTripDestination(destination);
+  return { title: routeTitle ?? shortNames.get(name) ?? name, place: [city, region].filter(Boolean).join(' · ') };
 }
 
 function offerEntry(offer, employee, canDispatch, open) {
@@ -45,7 +46,10 @@ function offerEntry(offer, employee, canDispatch, open) {
       key: `offer-${offer.id}`, kind: 'trips', icon: 'briefcase', ...tripPlace(offer.destination, offer.stops),
       person: employee ? null : offer.employeeName,
       description: rejected ? stages.find(stage => stage.status === 'rejected')?.reason ?? offer.purpose : offer.purpose,
-      date: period(offer.plannedStart, offer.plannedEnd), amount: offer.estimate?.total,
+      date: draft && offer.scheduleFrom
+        ? [...new Set([offer.scheduleFrom, offer.scheduleTo])].filter(Boolean)
+          .map(day => dateOnly.format(new Date(day))).join(' — ')
+        : period(offer.plannedStart, offer.plannedEnd), amount: offer.estimate?.total,
       status: draft ? 'Черновик' : rejected ? 'Отклонена'
         : pending ? `Согласование · ${pending.position} из ${stages.length}` : 'На согласовании',
       action, open, bucket: rejected ? 'history' : action ? 'action' : 'waiting',
@@ -183,7 +187,8 @@ export default function FieldVisitsOverview({ tasks = [], trips = [], offers = [
     return !employee || (task.status !== 'unassigned' && (task.object || task.address || task.objectId || task.location));
   });
   const entries = [
-    ...offers.filter(offer => offer.status !== 'confirmed' && (employee || !offer.selfRequested || offer.status !== 'awaiting_employee'))
+    ...offers.filter(offer => offer.status !== 'confirmed'
+      && (employee || !offer.selfRequested || offer.status !== 'awaiting_employee' || offer.scheduleFrom))
       .map(offer => offerEntry(offer, employee, canDispatch, () => onOffer(offer.id))),
     ...requests.filter(item => item.status !== 'approved').map(item => requestEntry(item, employee, () => onRequest(item.id))),
     ...trips.map(trip => tripEntry(trip, employee, () => onTrip(trip.id), routeByTrip.get(String(trip.id)) ?? [])),
@@ -215,7 +220,8 @@ export default function FieldVisitsOverview({ tasks = [], trips = [], offers = [
         : createTrip ? <Shortcut title="Новая командировка" icon="plus" primary
           disabled={createTripDisabled} onPress={createTrip} />
           : createTask ? <Shortcut title="Новое выездное задание" icon="plus" primary onPress={createTask} /> : null}
-      {importTrip && <Shortcut title="Импорт Excel" icon="upload" disabled={importTripDisabled} onPress={importTrip} />}
+      {importTrip && <Shortcut title={employee ? 'Импорт Excel' : 'Импорт графика'} icon="upload"
+        disabled={importTripDisabled} onPress={importTrip} />}
       {setup && <Shortcut title="Настроить согласование" icon="settings" onPress={setup} />}
       {onControl && <Shortcut title="Контроль" icon="chart" onPress={onControl} />}
     </View>}

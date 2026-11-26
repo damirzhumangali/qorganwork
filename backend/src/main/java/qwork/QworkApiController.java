@@ -50,6 +50,8 @@ final class QworkApiController {
     private static final Pattern CONTRACT = Pattern.compile("/contracts/([0-9]{1,19})");
     private static final Pattern CONTRACT_ACTIVATION = Pattern.compile("/contracts/([0-9]{1,19})/activate");
     private static final Pattern CONTRACT_RECEIPTS = Pattern.compile("/contracts/([0-9]{1,19})/receipts");
+    private static final Pattern CONTRACT_CLOSING_DOCUMENTS = Pattern.compile(
+        "/contracts/([0-9]{1,19})/closing-documents/([0-9]{1,19})/(avr|esf)");
     private static final Pattern REPEAT = Pattern.compile("/tasks/([0-9]{1,19})/repeat");
     private static final Pattern REPRESENTATIVE = Pattern.compile("/tasks/([0-9]{1,19})/representative");
     private static final Pattern REPRESENTATIVE_PHOTO = Pattern.compile("/tasks/([0-9]{1,19})/representative/([0-9]{1,19})/photo");
@@ -112,7 +114,7 @@ final class QworkApiController {
             try {
                 boolean post = "POST".equals(method);
                 boolean importing = post && ("/planning/import".equals(path) || "/planning/import/preview".equals(path)
-                    || "/trip-offers/import".equals(path));
+                    || "/trip-offers/import".equals(path) || "/trip-offers/schedule/preview".equals(path));
                 boolean photoRequest = post && ("/sync/events".equals(path) || PHOTOS.matcher(path).matches()
                     || "/representative/decision".equals(path));
                 Semaphore slots = importing ? IMPORT_SLOTS : photoRequest ? PHOTO_REQUEST_SLOTS : null;
@@ -202,7 +204,8 @@ final class QworkApiController {
                 ANALYTICS_SLOTS.release();
             }
         }
-        boolean write = ("POST".equals(method) && !"/planning/import/preview".equals(path)) || "PATCH".equals(method)
+        boolean write = ("POST".equals(method) && !"/planning/import/preview".equals(path)
+                && !"/trip-offers/schedule/preview".equals(path)) || "PATCH".equals(method)
             || ("PUT".equals(method) && CONTRACT.matcher(path).matches());
         var payload = switch (method + " " + path) {
             case "PATCH /auth/email" -> payload(request);
@@ -211,13 +214,15 @@ final class QworkApiController {
                  "POST /shifts/calendar", "POST /incidents", "POST /planning/templates",
                  "POST /planning/assignment-settings", "POST /field-work/defaults", "POST /trip-approval-settings",
                  "POST /field-control/work-mode", "POST /trip-offers", "POST /trip-organizations",
-                 "POST /contracts" -> payload(request);
-            case "POST /planning/import", "POST /planning/import/preview", "POST /trip-offers/import" -> payload(request, MAX_IMPORT_BODY);
+                 "POST /contracts", "POST /trip-offers/schedule/draft" -> payload(request);
+            case "POST /planning/import", "POST /planning/import/preview", "POST /trip-offers/import",
+                 "POST /trip-offers/schedule/preview" -> payload(request, MAX_IMPORT_BODY);
             case "POST /sync/events" -> payload(request, MAX_PHOTO_BODY);
             default -> {
                 if (("PUT".equals(method) && CONTRACT.matcher(path).matches())
                         || ("POST".equals(method) && (CONTRACT_ACTIVATION.matcher(path).matches()
-                            || CONTRACT_RECEIPTS.matcher(path).matches()))) {
+                            || CONTRACT_RECEIPTS.matcher(path).matches()
+                            || CONTRACT_CLOSING_DOCUMENTS.matcher(path).matches()))) {
                     yield payload(request);
                 }
                 if ("PATCH".equals(method) && TASK.matcher(path).matches()) {
@@ -246,8 +251,10 @@ final class QworkApiController {
                 db.setTransactionIsolation(Connection.TRANSACTION_REPEATABLE_READ);
             } else if (Db.postgres() && "POST".equals(method)
                     && ("/trip-offers/import".equals(path) || "/trip-organizations".equals(path)
+                        || "/trip-offers/schedule/draft".equals(path)
                         || "/trip-offers".equals(path) || "/trip-approval-settings".equals(path)
-                        || TRIP_OFFER_ACTION.matcher(path).matches() || CONTRACT_RECEIPTS.matcher(path).matches())) {
+                        || TRIP_OFFER_ACTION.matcher(path).matches() || CONTRACT_RECEIPTS.matcher(path).matches()
+                        || CONTRACT_CLOSING_DOCUMENTS.matcher(path).matches())) {
                 db.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
             }
             var user = Accounts.authenticate(db, token);
@@ -357,6 +364,8 @@ final class QworkApiController {
             case "GET /trip-offers/import/template": return ok(TripXlsxImport.template(user));
             case "POST /trip-offers": return created(TripOffers.create(db, user, payload));
             case "POST /trip-offers/import": return ok(TripXlsxImport.process(db, user, payload));
+            case "POST /trip-offers/schedule/preview": return ok(TripScheduleImport.preview(user, payload));
+            case "POST /trip-offers/schedule/draft": return ok(TripScheduleImport.draft(db, user, payload));
             case "GET /field-control": return ok(FieldControl.dashboard(db, user));
             case "POST /field-control/work-mode": return ok(FieldControl.setWorkMode(db, user, payload));
             case "POST /sync/events": return ok(Sync.apply(db, user, payload));
@@ -395,6 +404,11 @@ final class QworkApiController {
         var contractReceipts = CONTRACT_RECEIPTS.matcher(path);
         if ("POST".equals(method) && contractReceipts.matches()) {
             return created(Contracts.recordReceipt(db, user, id(contractReceipts.group(1)), payload));
+        }
+        var closingDocument = CONTRACT_CLOSING_DOCUMENTS.matcher(path);
+        if ("POST".equals(method) && closingDocument.matches()) {
+            return ok(Contracts.recordClosingDocument(db, user, id(closingDocument.group(1)),
+                id(closingDocument.group(2)), closingDocument.group(3), payload));
         }
         var conflict = CONFLICT_RESOLVE.matcher(path);
         if ("POST".equals(method) && conflict.matches()) {
@@ -531,7 +545,8 @@ final class QworkApiController {
         return switch (operation) {
             case "GET /auth/me", "POST /auth/logout", "PATCH /auth/email", "POST /auth/email/request", "GET /contracts" -> true;
             default -> ("GET".equals(method) && CONTRACT.matcher(path).matches())
-                || ("POST".equals(method) && CONTRACT_RECEIPTS.matcher(path).matches());
+                || ("POST".equals(method) && (CONTRACT_RECEIPTS.matcher(path).matches()
+                    || CONTRACT_CLOSING_DOCUMENTS.matcher(path).matches()));
         };
     }
 

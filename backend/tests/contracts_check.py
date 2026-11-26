@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Exercise contract schedules through the packaged API using a disposable database."""
+"""Exercise contract schedules and closing documents against a disposable database."""
 
+from base64 import b64encode
 from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
@@ -8,9 +9,11 @@ import json
 import os
 from pathlib import Path
 import re
+import struct
 import subprocess
 import tempfile
 import time
+import zlib
 from urllib.error import HTTPError, URLError
 from urllib.request import ProxyHandler, Request, build_opener
 from uuid import uuid4
@@ -71,6 +74,110 @@ def local_api(jar, directory):
                 except subprocess.TimeoutExpired:
                     server.kill()
                     server.wait()
+
+
+def report_photo():
+    """Generate a valid, high-contrast proof image without external fixtures."""
+    width, height = 640, 480
+    scanlines = b"".join(
+        b"\x00" + bytes(220 if (x // 20 + y // 20) % 2 else 50 for x in range(width))
+        for y in range(height)
+    )
+
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+
+    png = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 0, 0, 0, 0))
+    return b64encode(png + chunk(b"IDAT", zlib.compress(scanlines)) + chunk(b"IEND", b"")).decode("ascii")
+
+
+def check_closing_documents(call, path, trip_id, site, today, manager, employee, accountant, other_accountant):
+    original = call("GET", path, token=accountant)
+    assert original["permissions"]["canIssueDocuments"] is True
+    assert original["contract"]["closingDocuments"] == []
+    assert call("GET", path, token=manager)["permissions"]["canIssueDocuments"] is False
+
+    employee_id = call("GET", "/auth/me", token=employee)["user"]["id"]
+    task = call("POST", "/tasks", 201, token=manager, payload={
+        "title": "Монтаж и обучение заказчика",
+        "objectId": site,
+        "assigneeId": employee_id,
+        "checklist": [{"id": "work", "title": "Работы выполнены"}],
+    })["task"]
+    task_path = f'/tasks/{task["id"]}'
+    call("POST", f"/trips/{trip_id}/tasks", token=manager, payload={"taskIds": [task["id"]]})
+
+    for status in ("accepted", "travel", "arrived"):
+        transition = {"status": status, "expectedRevision": task["revision"]}
+        if status == "arrived":
+            transition["arrival"] = {"reason": "Тестовая отметка прибытия"}
+        task = call("PATCH", task_path, token=employee, payload=transition)["task"]
+    photo = report_photo()
+    def upload(kind):
+        return call("POST", task_path + "/photos", 201, token=employee, payload={
+            "kind": kind, "imageBase64": photo,
+        })["task"]
+
+    upload("before")
+    task = call("PATCH", task_path, token=employee, payload={"status": "work"})["task"]
+    submission = {
+        "status": "review", "checklist": [{"id": "work", "status": "done"}],
+        "outcome": {"work": "Монтаж и обучение завершены"},
+    }
+    review = call("PATCH", task_path, token=employee, payload={
+        **submission, "expectedRevision": upload("after")["revision"],
+    })["task"]
+    assert call("GET", path, token=accountant)["contract"]["closingDocuments"] == []
+
+    acceptance = {"status": "done", "expectedRevision": review["revision"]}
+    assert call("PATCH", task_path, token=manager, payload=acceptance)["task"]["status"] == "done"
+    call("PATCH", task_path, 409, token=manager, payload=acceptance)
+    documents = call("GET", path, token=accountant)["contract"]["closingDocuments"]
+    assert len(documents) == 1
+    document = documents[0]
+    assert document["taskId"] == task["id"] and document["taskTitle"] == task["title"]
+    assert document["createdByName"] == "Руководитель" and document["createdAt"]
+    assert document["canRecord"] is True and document["avr"] is None and document["esf"] is None
+
+    document_path = f'{path}/closing-documents/{document["id"]}'
+    avr = {"number": "АВР-15", "issuedOn": today.isoformat()}
+    esf = {"number": "ЭСФ-33", "issuedOn": today.isoformat()}
+    call("POST", document_path + "/avr", 403, token=manager, payload=avr)
+    call("POST", document_path + "/avr", 403, token=employee, payload=avr)
+    call("POST", document_path + "/avr", 404, token=other_accountant, payload=avr)
+    call("POST", document_path + "/esf", 409, token=accountant, payload=esf)
+    call("POST", document_path + "/avr", 400, token=accountant, payload={
+        **avr, "issuedOn": (today + timedelta(days=1)).isoformat(),
+    })
+
+    marked = call("POST", document_path + "/avr", token=accountant, payload=avr)
+    assert marked == call("POST", document_path + "/avr", token=accountant, payload=avr)
+    call("POST", document_path + "/avr", 409, token=accountant, payload={**avr, "number": "Другой АВР"})
+    marked_task, = marked["contract"]["closingDocuments"]
+    assert marked_task["esf"] is None
+    call("PATCH", task_path, token=manager, payload={"status": "reopened", "reopenReason": "Дополнительная проверка"})
+    reopened, = call("GET", path, token=accountant)["contract"]["closingDocuments"]
+    assert reopened == {**marked_task, "canRecord": False}
+    call("POST", document_path + "/esf", 409, token=accountant, payload=esf)
+    call("PATCH", task_path, token=employee, payload={"status": "work"})
+    review = call("PATCH", task_path, token=employee, payload={
+        **submission, "expectedRevision": upload("after")["revision"],
+    })["task"]
+    call("PATCH", task_path, token=manager, payload={"status": "done", "expectedRevision": review["revision"]})
+    assert call("GET", path, token=accountant)["contract"]["closingDocuments"] == [marked_task]
+    call("POST", document_path + "/esf", 400, token=accountant, payload={
+        **esf, "issuedOn": (today - timedelta(days=1)).isoformat(),
+    })
+    completed = call("POST", document_path + "/esf", token=accountant, payload=esf)["contract"]
+    assert completed == call("GET", path, token=manager)["contract"]
+    closing_task, = completed["closingDocuments"]
+    for kind, fields in (("avr", avr), ("esf", esf)):
+        mark = closing_task[kind]
+        assert all(mark[key] == value for key, value in fields.items())
+        assert mark["recordedAt"] and mark["recordedByName"] == "Бухгалтер"
+    for field in ("paidAmount", "outstandingAmount", "payments"):
+        assert completed[field] == original["contract"][field]
+    return completed
 
 
 def check_contracts(call):
@@ -245,13 +352,17 @@ def check_contracts(call):
     report_path = f'/trips/{approved["tripId"]}/report'
     report = call("GET", report_path, token=employee)["trip"]
     assert report["contractId"] == route_contract["id"] and report["stops"] == trip["stops"]
+    closed = check_closing_documents(call, route_contract_path, approved["tripId"], site, today,
+                                    manager, employee, accountant, other_accountant)
+    assert call("GET", path, token=manager)["contract"] == result
+    report = call("GET", report_path, token=employee)["trip"]
 
     standalone = {key: value for key, value in trip_payload.items()
                   if key not in ("contractId", "objectIds", "visitTimes", "city")}
     standalone.update(requestId=str(uuid4()), destination="Офис")
     offer = call("POST", "/trip-offers", 201, token=employee, payload=standalone)["offer"]
     assert offer["contractId"] is None and offer["stops"] == []
-    return manager, path, result, report_path, report
+    return manager, path, result, report_path, report, route_contract_path, closed
 
 
 def main():
@@ -262,11 +373,12 @@ def main():
     with tempfile.TemporaryDirectory(prefix="qwork-contracts-") as directory:
         directory = Path(directory)
         with local_api(jar, directory) as call:
-            manager, path, active, report_path, report = check_contracts(call)
+            manager, path, active, report_path, report, closed_path, closed = check_contracts(call)
         with local_api(jar, directory) as call:
             assert call("GET", path, token=manager)["contract"] == active
             assert call("GET", report_path, token=manager)["trip"] == report
-    print("PASS contracts: schedules, activation, accountant access, receipts, and linked trip routes")
+            assert call("GET", closed_path, token=manager)["contract"] == closed
+    print("PASS contracts: schedules, activation, accountant access, receipts, trip routes, and closing documents")
 
 
 if __name__ == "__main__":
