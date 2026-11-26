@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Keyboard, Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
-import DateTimePicker from '@react-native-community/datetimepicker';
+import DateTimePicker from './DateTimeControl';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon, colors } from './ui';
 
@@ -88,7 +88,7 @@ export default function DeadlinePicker({ value, onChange, disabled = false,
   }
 
   function change(event, nextDate) {
-    if (Platform.OS === 'android') {
+    if (Platform.OS === 'android' || Platform.OS === 'web') {
       if (!disabled && event.type === 'set' && validDate(nextDate)) {
         onChange(mergeDeadline(draft, nextDate, editor));
       }

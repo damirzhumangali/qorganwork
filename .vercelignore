@@ -1,0 +1,15 @@
+.git
+.env*
+**/.env*
+**/node_modules
+**/.expo
+**/.vercel
+backend
+dist
+mobile/dist
+*.zip
+*.log
+**/*.sqlite*
+**/*.db
+**/*.pem
+**/*.key

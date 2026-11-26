@@ -22,7 +22,7 @@ import { apiImageSource, apiOrigin, apiRequest } from './src/api';
 import { openOffline } from './src/offline';
 import { openOfflineMedia } from './src/offlineMedia';
 import { createCompanyLink, createEmployeeInvite, parseCompanyLink, parseEmployeeInvite } from './src/companyLink';
-import QuickAccess, { clearQuickAccess, readQuickAccess } from './src/QuickAccess';
+import QuickAccess, { clearQuickAccess, readQuickAccess, quickAccessSupported } from './src/QuickAccess';
 
 const STORAGE_KEY = 'qwork.tasks.v1';
 const INVITATION_KEY = 'qwork.company-link.v1';
@@ -198,7 +198,7 @@ function Profile({ session, role, onSignOut, onDemoRole, onTasks, onShifts, onQu
         ))}
         {session && <View style={styles.profileRow}><View style={styles.profileIcon}><Icon name="user" size={20} /></View><View style={styles.taskCopy}><Text style={styles.smallText}>Логин</Text><Text selectable style={styles.profileRowLabel}>{session.user.login}</Text></View></View>}
         {session?.user.department ? <View style={styles.profileRow}><View style={styles.profileIcon}><Icon name="building" size={20} /></View><View style={styles.taskCopy}><Text style={styles.smallText}>Подразделение</Text><Text style={styles.profileRowLabel}>{session.user.department}</Text></View></View> : null}
-        {session && <Pressable accessibilityRole="button" accessibilityLabel="Настроить быстрый вход" onPress={onQuickAccess} style={styles.profileRow}>
+        {session && quickAccessSupported && <Pressable accessibilityRole="button" accessibilityLabel="Настроить быстрый вход" onPress={onQuickAccess} style={styles.profileRow}>
           <View style={styles.profileIcon}><Icon name="shield" size={20} /></View>
           <View style={styles.taskCopy}><Text style={styles.profileRowLabel}>Быстрый вход</Text><Text style={styles.smallText}>Настроить вход на этом телефоне</Text></View>
           <Icon name="chevron-right" size={18} color={c.muted} />
@@ -518,7 +518,8 @@ function Workspace() {
     }
     setSavedQuickAccess(null);
     rememberCompany(nextSession);
-    setSetupSession(workspaceSession(nextSession));
+    if (quickAccessSupported) setSetupSession(workspaceSession(nextSession));
+    else enter(nextSession);
   }
 
   async function finishSetup(nextSession) {

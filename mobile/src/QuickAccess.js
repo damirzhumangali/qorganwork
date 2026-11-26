@@ -8,6 +8,7 @@ import * as SecureStore from 'expo-secure-store';
 import { Icon } from './ui';
 
 const ACCESS_KEY = 'qwork.quick-access.v1';
+export const quickAccessSupported = true;
 const BIOMETRIC_KEY = 'qwork.biometric-session.v1';
 const MAX_ATTEMPTS = 5;
 const iosExpoGo = Platform.OS === 'ios' && (Constants.executionEnvironment === 'storeClient' || Constants.appOwnership === 'expo');

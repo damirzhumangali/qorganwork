@@ -11,7 +11,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import MapView, { Circle as ArrivalCircle, Marker } from 'react-native-maps';
+import MapView, { Circle as ArrivalCircle, Marker } from './MapView';
 import { DispatcherPhotoPicker, TaskPhotoGallery } from './TaskPhotos';
 import { OfficeShiftPanel, TaskTransfer } from './ShiftScreens';
 import PlanningScreens from './PlanningScreens';

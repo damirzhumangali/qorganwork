@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CryptoDigestAlgorithm, digestStringAsync, randomUUID } from 'expo-crypto';
-import { Directory, File, Paths } from 'expo-file-system';
+import { openPhotoStorage } from './photoStorage';
 
 const openStores = new Map();
 const version = 1;
@@ -63,17 +63,8 @@ function isReplaceablePhoto(event) {
   return event.kind === 'photo' && event.issue && !event.issue.conflict && event.issue.replaceable !== false;
 }
 
-function safeDelete(file) {
-  try {
-    if (file.exists) file.delete();
-  } catch {
-    // The event is already durable or acknowledged. Do not undo it on cleanup failure.
-  }
-}
-
 async function loadStore(scope) {
   const key = `qwork.offline.v${version}.${scope}`;
-  const folder = new Directory(Paths.document, 'qwork-offline', scope);
   const stored = await AsyncStorage.getItem(key);
   let state = stored ? JSON.parse(stored) : { tasks: [], queue: [] };
   if (!Array.isArray(state.tasks) || !Array.isArray(state.queue)) {
@@ -81,20 +72,7 @@ async function loadStore(scope) {
   }
   let writes = Promise.resolve();
   let flushing = null;
-  const photoName = event => `${event.eventId}.${event.photoExtension === 'png' ? 'png' : 'jpg'}`;
-  const photo = event => new File(folder, photoName(event));
-
-  // File writes happen before queue commits. An app interruption may leave only an orphan file.
-  if (folder.exists) {
-    const retained = new Set(state.queue.filter(row => row.kind === 'photo').map(photoName));
-    try {
-      for (const item of folder.list()) {
-        if (item instanceof File && !retained.has(item.name)) safeDelete(item);
-      }
-    } catch {
-      // Retain orphan files if the directory cannot be inspected.
-    }
-  }
+  const photos = await openPhotoStorage(scope, state.queue.filter(row => row.kind === 'photo'));
 
   function serialized(operation) {
     const next = writes.then(operation);
@@ -114,17 +92,9 @@ async function loadStore(scope) {
     }
     // Expo may supply either format, so choose the suffix from the file signature.
     event.photoExtension = body.imageBase64.startsWith('iVBORw0KGgo') ? 'png' : 'jpg';
-    folder.create({ intermediates: true, idempotent: true });
-    const file = photo(event);
-    try {
-      file.create();
-      await file.write(body.imageBase64, { encoding: 'base64' });
-      delete body.imageBase64;
-      return file;
-    } catch (error) {
-      safeDelete(file);
-      throw error;
-    }
+    await photos.save(event, body.imageBase64);
+    delete body.imageBase64;
+    return event;
   }
 
   function snapshot() {
@@ -175,7 +145,7 @@ async function loadStore(scope) {
         if (kind === 'photo') file = await savePhoto(event);
         await commit({ ...state, queue: [...state.queue, event] });
       } catch (error) {
-        if (file) safeDelete(file);
+        if (file) await photos.remove(file);
         throw error;
       }
       return snapshot();
@@ -196,10 +166,10 @@ async function loadStore(scope) {
       try {
         await commit({ ...state, queue: state.queue.map(row => row === previous ? event : row) });
       } catch (error) {
-        safeDelete(file);
+        await photos.remove(file);
         throw error;
       }
-      safeDelete(photo(previous));
+      await photos.remove(previous);
       return snapshot();
     });
   }
@@ -218,7 +188,7 @@ async function loadStore(scope) {
 
   function pendingPhotos(taskId) {
     return state.queue.filter(row => row.taskId === taskId && row.kind === 'photo').map(row => ({
-      id: row.eventId, kind: row.body.kind, localUri: photo(row).uri, pending: true,
+      id: row.eventId, kind: row.body.kind, localUri: photos.uri(row), pending: true,
       caption: row.body.caption, capturedAt: row.body.capturedAt ?? row.occurredAt,
       pairKey: row.body.pairKey ?? 'main', checklistId: row.body.checklistId,
       latitude: row.body.latitude, longitude: row.body.longitude, accuracy: row.body.accuracy,
@@ -232,7 +202,7 @@ async function loadStore(scope) {
       if (!discard.some(row => row.issue)) return snapshot();
       await commit({ ...state, queue: state.queue.filter(row => row.taskId !== taskId) });
       for (const row of discard) {
-        if (row.kind === 'photo') safeDelete(photo(row));
+        if (row.kind === 'photo') await photos.remove(row);
       }
       return snapshot();
     });
@@ -246,7 +216,7 @@ async function loadStore(scope) {
         ? state.queue.map(row => row.eventId === event.eventId ? { ...row, issue } : row)
         : state.queue.filter(row => row.eventId !== event.eventId);
       await commit({ tasks, queue });
-      if (!issue && event.kind === 'photo') safeDelete(photo(event));
+      if (!issue && event.kind === 'photo') await photos.remove(event);
       return snapshot();
     });
   }
@@ -259,7 +229,7 @@ async function loadStore(scope) {
       const body = { ...event.body };
       if (event.kind === 'photo') {
         try {
-          body.imageBase64 = await photo(event).base64();
+          body.imageBase64 = await photos.read(event);
           if (!body.imageBase64) throw new Error('Файл фотографии пуст.');
         } catch {
           const next = await applyResult(event, null, {

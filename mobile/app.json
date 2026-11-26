@@ -7,8 +7,16 @@
     "userInterfaceStyle": "light",
     "platforms": [
       "ios",
-      "android"
+      "android",
+      "web"
     ],
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "name": "qwork",
+      "themeColor": "#087CFF",
+      "backgroundColor": "#F5F7FC"
+    },
     "scheme": "qwork",
     "ios": {
       "bundleIdentifier": "com.qwork.mobile"

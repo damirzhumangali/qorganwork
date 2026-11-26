@@ -13,6 +13,7 @@ node_modules/
 *.log
 *.zip
 .openai/
+.vercel/
 
 # Expo local state and generated native bundles
 mobile/.expo/
@@ -24,3 +25,5 @@ backend/__pycache__/
 
 # Java build output
 backend/target/
+.vercel
+.env*

@@ -1,0 +1,12 @@
+{
+  "name": "qwork — команда, задачи, результат",
+  "short_name": "qwork",
+  "lang": "ru",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F5F7FC",
+  "theme_color": "#087CFF",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

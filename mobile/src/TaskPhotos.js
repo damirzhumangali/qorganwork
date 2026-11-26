@@ -1,10 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { File, FileMode } from 'expo-file-system';
+import { FileMode } from 'expo-file-system';
+import { photoFile } from './photoInput';
+import Image from './ProtectedImage';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import {
-  ActivityIndicator, Image, Linking, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View,
+  ActivityIndicator, Linking, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Icon } from './ui';
@@ -60,7 +62,7 @@ async function readPhotoBase64(file) {
 
 async function prepareGalleryPhoto(asset) {
   checkResolution(asset);
-  const source = new File(asset.uri);
+  const source = photoFile(asset.uri);
   checkFileSize(source);
   const handle = source.open(FileMode.ReadOnly);
   let header;
@@ -84,7 +86,7 @@ async function prepareGalleryPhoto(asset) {
     try {
       checkResolution(image);
       const normalized = await image.saveAsync({ format: SaveFormat.PNG });
-      const file = new File(normalized.uri);
+      const file = photoFile(normalized.uri);
       try {
         return await readPhotoBase64(file);
       } finally {
@@ -198,7 +200,7 @@ export function EmployeeCamera({ kind, pairKey, checklistId, onUpload, onLocate,
       if (Math.min(photo.width, photo.height) < 480 || Math.max(photo.width, photo.height) < 640) {
         throw new Error('Разрешение снимка слишком низкое. Сделайте новый снимок.');
       }
-      const imageBase64 = await readPhotoBase64(new File(photo.uri));
+      const imageBase64 = await readPhotoBase64(photoFile(photo.uri));
       setPreview({ imageBase64, uri: photo.uri, capturedAt, position: getPhotoPosition(onLocate) });
     } catch (failure) {
       setError(failure.message || 'Не удалось сделать снимок. Попробуйте ещё раз.');
