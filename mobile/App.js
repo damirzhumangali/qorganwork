@@ -7,6 +7,7 @@ import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import AuthScreens from './src/AuthScreens';
+import DemoEntry, { DemoRoleSwitch } from './src/DemoEntry';
 import OfficeScreens from './src/OfficeScreens';
 import ContractsScreen from './src/ContractsScreen';
 import EmployeeDashboard from './src/EmployeeDashboard';
@@ -25,6 +26,7 @@ import { createCompanyLink, createEmployeeInvite, parseCompanyLink, parseEmploye
 import QuickAccess, { clearQuickAccess, readQuickAccess, quickAccessSupported } from './src/QuickAccess';
 
 const STORAGE_KEY = 'qwork.tasks.v1';
+const DEMO_ONLY = process.env.EXPO_PUBLIC_QWORK_DEMO_ONLY === '1';
 const INVITATION_KEY = 'qwork.company-link.v1';
 const QUICK_ACCESS_ONLINE_TIMEOUT_MS = 70000;
 const SAMPLE_STAFF = [
@@ -215,7 +217,7 @@ function Profile({ session, role, onSignOut, onDemoRole, onTasks, onShifts, onQu
         <Pressable key={key} accessibilityRole="button" onPress={() => onDemoRole(key)} style={styles.profileRow}><Text style={styles.profileRowLabel}>{label}</Text><Icon name={role === key ? 'check' : 'chevron-right'} size={18} /></Pressable>
       ))}</View>}
       <Pressable accessibilityRole="button" onPress={onSignOut} style={styles.signOut}>
-        <Icon name="logout" color={c.red} size={20} /><Text style={styles.signOutText}>Выйти из аккаунта</Text>
+        <Icon name="logout" color={c.red} size={20} /><Text style={styles.signOutText}>{session ? 'Выйти из аккаунта' : 'К выбору роли'}</Text>
       </Pressable>
     </ScrollView>
   );
@@ -271,7 +273,8 @@ function Workspace() {
   const [storageAvailable, setStorageAvailable] = useState(true);
   const request = useCallback((path, options) => {
     const token = sessionRef.current?.token;
-    if (!token) return Promise.reject(new Error('Войдите в аккаунт ещё раз.'));
+    if (!token) return Promise.reject(new Error(DEMO_ONLY
+      ? 'Этот раздел использует данные компании и недоступен в демо-режиме.' : 'Войдите в аккаунт ещё раз.'));
     return apiRequest(path, { ...options, token });
   }, []);
   const imageSource = useCallback(path => apiImageSource(path, session?.token), [session?.token]);
@@ -298,6 +301,7 @@ function Workspace() {
   }, [request]);
 
   useEffect(() => {
+    if (DEMO_ONLY) { setSavedQuickAccess(null); return; }
     let mounted = true;
     readQuickAccess()
       .then(saved => { if (mounted) setSavedQuickAccess(saved); })
@@ -309,6 +313,7 @@ function Workspace() {
   }, []);
 
   useEffect(() => {
+    if (DEMO_ONLY) return;
     if (parseEmployeeInvite(openedUrl) || parseCompanyLink(openedUrl)) setIncomingInvitation(openedUrl);
   }, [openedUrl]);
 
@@ -827,13 +832,13 @@ function Workspace() {
   const missingSampleStaff = sampleStaffAccounts(session).filter(account => !hasSampleEmployee(employees, account));
   const syncIssue = isEmployeeSession ? offlineSnapshot?.issues[0] : null;
   const replaceablePhoto = syncIssue?.replaceable && tasks?.some(task => task.id === syncIssue.taskId);
-  const quickAccess = setupSession || (savedQuickAccess && !incomingInvitation);
+  const quickAccess = !DEMO_ONLY && (setupSession || (savedQuickAccess && !incomingInvitation));
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
       <StatusBar barStyle="dark-content" />
       {demoTasks === null || savedQuickAccess === undefined ? (
         <View style={styles.loading}><ActivityIndicator color="#245BE8" /></View>
-      ) : setupSession || (role === null && quickAccess) ? (
+      ) : !DEMO_ONLY && (setupSession || (role === null && quickAccess)) ? (
         <QuickAccess
           session={setupSession}
           saved={savedQuickAccess}
@@ -846,7 +851,7 @@ function Workspace() {
           }}
         />
       ) : role === null ? (
-        <AuthScreens
+        DEMO_ONLY ? <DemoEntry onSelectRole={switchRole} /> : <AuthScreens
           api={apiRequest}
           invitationUrl={incomingInvitation}
           savedCompanyUrl={savedInvitation}
@@ -883,6 +888,7 @@ function Workspace() {
               </Pressable>
             </View>
           </View>
+          {DEMO_ONLY && !session && <DemoRoleSwitch role={role} onSelectRole={switchRole} />}
           {!session && storageError && <Text accessibilityRole="alert" style={styles.storageWarning}>Локальное сохранение недоступно.</Text>}
           {networkError ? <Text accessibilityRole="alert" style={styles.storageWarning}>{networkError}</Text> : null}
           {syncIssue && (
@@ -918,8 +924,8 @@ function Workspace() {
                 onSelect={openEmployeeTask} request={isEmployeeSession ? request : undefined} offline={showOfflineIcon}
                 onTripOffer={offerId => navigate('trips', { view: 'trips', offerId })} />
             ) : role === 'employee' && page === 'shifts' && !session ? (
-              <View style={styles.empty}><Icon name="calendar" size={36} /><Text style={styles.taskTitle}>Ваш рабочий график</Text><Text style={styles.muted}>Войдите в компанию, чтобы увидеть назначенные смены.</Text>
-                <Pressable onPress={signOut} accessibilityRole="button" style={styles.demoEnter}><Text style={styles.demoEnterText}>Войти в аккаунт</Text></Pressable>
+              <View style={styles.empty}><Icon name="calendar" size={36} /><Text style={styles.taskTitle}>Ваш рабочий график</Text><Text style={styles.muted}>{DEMO_ONLY ? 'В демо-режиме смены не назначены. Откройте задачи, чтобы посмотреть работу сотрудника.' : 'Войдите в компанию, чтобы увидеть назначенные смены.'}</Text>
+                <Pressable onPress={DEMO_ONLY ? () => navigate('tasks') : signOut} accessibilityRole="button" style={styles.demoEnter}><Text style={styles.demoEnterText}>{DEMO_ONLY ? 'Открыть задачи' : 'Войти в аккаунт'}</Text></Pressable>
               </View>
             ) : role === 'employee' && page === 'trips' && !selected ? (
               <EmployeeFieldVisits key={navigationId} request={session ? request : undefined}

@@ -1396,7 +1396,7 @@ export default function OfficeScreens({
           <RequestError message={error} />
         </>}
 
-        {!server && ['team', 'operations', 'planning', 'analytics', 'field-operations'].includes(creating) && <View style={styles.emptyCard}><Icon name="shield" size={30} color={colors.blue} /><Text style={styles.label}>Войдите в рабочее пространство</Text><Text style={styles.muted}>Этот раздел использует данные вашей компании.</Text><Button onPress={() => openForm(null)} secondary>К демонстрационным заявкам</Button></View>}
+        {!server && ['team', 'operations', 'planning', 'analytics', 'field-operations'].includes(creating) && <View style={styles.emptyCard}><Icon name="shield" size={30} color={colors.blue} /><Text style={styles.label}>Данные компании</Text><Text style={styles.muted}>В демо-режиме доступны создание заявок и проверка результатов. Этот раздел требует данных компании.</Text><Button onPress={() => openForm(null)} secondary>К демонстрационным заявкам</Button></View>}
 
         {selected && (
           <>
