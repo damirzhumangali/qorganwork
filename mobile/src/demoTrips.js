@@ -2,6 +2,7 @@ import { tripBudgetTotals } from './tripBudgetCalculation';
 import { handleDemoDocuments } from './demoDocuments';
 import { accountingTrip, handleDemoAccounting } from './demoAccounting';
 import { handleDemoVisits, tripWithVisitSites } from './demoVisits';
+import { initializeDemoAutoVisit, syncDemoVisitSimulation } from './demoVisitSimulation';
 
 const STORAGE_KEY = 'qwork.demo-trips.v1';
 const employee = { employeeId: 'demo-employee', employeeName: 'Демо-сотрудник' };
@@ -52,6 +53,11 @@ export function createDemoTrips(storage, now = () => new Date().toISOString()) {
       return copy(result);
     };
     const nextId = () => String(state.nextId++);
+
+    if (method === 'POST' && path === '/demo/visits/sync') {
+      const result = syncDemoVisitSimulation(state.trips, now());
+      return result.changed ? save(result) : result;
+    }
 
     const visit = await handleDemoVisits({ state, role, path, method, body, now, save });
     if (visit !== null) return visit;
@@ -203,6 +209,7 @@ export function createDemoTrips(storage, now = () => new Date().toISOString()) {
       if (action === 'start') {
         requireValue(trip.status === 'planned', 'Поездка уже начата.');
         trip.status = 'active'; trip.startedAt = timestamp;
+        initializeDemoAutoVisit(trip, timestamp);
       } else if (action === 'finish') {
         requireValue(trip.status === 'active', 'Сначала начните поездку.');
         requireValue(trip.stops.every(stop => stop.visitedAt || stop.skippedAt), 'Отметьте все остановки перед завершением.');

@@ -79,8 +79,9 @@ function tripEntry(trip, employee, open, stops) {
   const end = time(trip.plannedEnd);
   const overdue = !finished && !active && end != null && end < Date.now();
   const visited = stops.filter(stop => stop.visitedAt).length;
+  const simulated = stops.filter(stop => stop.visitedAt && stop.visitEvidence?.method === 'demo_simulation').length;
   const skipped = stops.filter(stop => stop.skippedAt).length;
-  const description = [stops.length ? `Посещено ${visited} из ${stops.length}` : '',
+  const description = [stops.length ? `Посещено ${visited} из ${stops.length}${simulated ? ` (демо: ${simulated})` : ''}` : '',
     skipped ? `Пропущено · ${skipped}` : '', trip.taskCount > 0 ? `Заявок · ${trip.taskCount}` : ''].filter(Boolean).join(' · ');
   return {
     key: `trip-${trip.id}`, kind: 'trips', icon: 'briefcase', ...tripPlace(trip.destination, stops),

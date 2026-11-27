@@ -18,7 +18,9 @@ import TripScheduleImport from './TripScheduleImport';
 import { SCHEDULE_DESTINATIONS } from './TripScheduleCatalog';
 import { cityDestinationIds, tripCityOptions, tripDestinationCatalog, defaultTripPeriod, planTripVisits, DEFAULT_TRIP_PURPOSE, recentTripRate } from './tripPlanning';
 import TripPeriodPicker from './TripPeriodPicker';
-import TripAutoVisits, { TripVisitStopControls } from './TripAutoVisits';
+import { TripVisitStopControls } from './TripAutoVisits';
+import TripDemoVisits from './TripDemoVisits';
+import { subscribeDemoVisitChanges } from './demoVisitRuntime';
 
 export const TASK_STATUS = {
   assigned: 'Назначена', unassigned: 'Без исполнителя', accepted: 'Принята сотрудником',
@@ -96,10 +98,12 @@ function useResource(request, path, paused = false) {
     void reload();
     const foreground = AppState.addEventListener('change', state => { if (state === 'active') void reload(); });
     const timer = setInterval(() => { if (AppState.currentState === 'active') void reload(); }, 15000);
+    const unsubscribe = subscribeDemoVisitChanges(() => { if (path === '/trips' || /^\/trips\/[^/]+\/report$/.test(path)) void reload(); });
     return () => {
       generation.current++;
       foreground.remove();
       clearInterval(timer);
+      unsubscribe();
     };
   }, [reload, path, paused, request]);
   return { value, error: failure ? failure.message || 'Не удалось получить данные.' : '',
@@ -942,7 +946,7 @@ function TripReport({ demo = false, id, request, offline, employee, canEditBudge
             {trip.status === 'planned' ? 'Начать поездку' : 'Завершить поездку'}
           </Button>}
           {employee && active && stopsRemaining > 0 && <Text style={styles.muted}>
-            {demo ? 'Посещения подтверждаются автоматически по GPS. Если куда-то не заехали, укажите причину пропуска.'
+            {demo ? 'В демо посещения отмечаются автоматически по учебному сценарию. Если объект пропущен, укажите причину.'
               : 'Перед завершением отметьте все остановки ниже. Если куда-то не заехали, укажите причину.'}
           </Text>}
           {report.value.summary.elapsedMinutes != null && <Text style={styles.body}>
@@ -952,14 +956,11 @@ function TripReport({ demo = false, id, request, offline, employee, canEditBudge
         </Card>
         {stops.length > 0 && <TripRouteSummary stops={stops} active={active} offline={offline}
           automatic={demo} onMark={employee && active ? recordStop : undefined} busy={busy} error={stopAction.error}
-          renderStopExtra={demo ? stop => <TripVisitStopControls key={stop.id} stop={stop} employee={employee}
+          renderStopExtra={demo ? stop => <TripVisitStopControls key={stop.id} stop={stop} employee={employee} simulation
             manager={!employee && trip.status !== 'finished'} active={active} busy={busy || offline}
             onLocation={(stopId, body) => recordStop(stopId, body, '/location')}
             onUndo={(stopId, body) => recordStop(stopId, body, '/undo')} /> : undefined}>
-          {demo && employee && active && <TripAutoVisits
-            key={trip.stops.reduce((count, stop) => count + (stop.visitHistory ?? []).filter(event => event.action === 'undo').length, 0)}
-            trip={trip} onRecord={recordStop} busy={busy} offline={offline} />}
-          {demo && !employee && <Text style={styles.muted}>Укажите точное здание для каждой организации. Сотрудник будет отмечен автоматически после минуты рядом с объектом.</Text>}
+          {demo && active && <TripDemoVisits trip={trip} />}
         </TripRouteSummary>}
         <Card title="Расходы на поездку" icon="clipboard">
           <Text style={styles.muted}>Ставка считается за календарные дни по времени Алматы. Проезд, жильё, питание и прочее указываются за всю поездку.</Text>

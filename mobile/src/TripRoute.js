@@ -170,6 +170,7 @@ export function TripRouteSummary({ stops = [], active = false, onMark, busy = fa
   return <View style={styles.card}>
     <Text accessibilityRole="header" style={styles.title}>{multiple ? 'Маршрут поездки' : 'Посещение объекта'}</Text>
     {multiple && <Text style={styles.muted}>Посещено {visited} из {stops.length}
+      {stops.some(stop => stop.visitEvidence?.method === 'demo_simulation') ? ' · есть демо-отметки' : ''}
       {skipped > 0 ? ' · Пропущено ' + skipped : ''}</Text>}
     {children}
     {canMark && offline && <Text style={styles.muted}>Для отметки точек нужна связь.</Text>}
@@ -182,11 +183,12 @@ export function TripRouteSummary({ stops = [], active = false, onMark, busy = fa
         <StopHeading index={index} destination={stop.destination} multiple={multiple} />
         <Text style={styles.muted}>{planned ? 'По плану · ' + planned : 'Время посещения ещё не согласовано'}</Text>
         <Text style={[styles.badge, stop.visitedAt && styles.visited, stop.skippedAt && styles.skipped]}>
-          {stop.visitedAt ? (automatic ? stop.visitEvidence?.method === 'gps' ? 'Посещена · GPS' : 'Отмечена вручную ранее'
+          {stop.visitedAt ? (automatic ? stop.visitEvidence?.method === 'demo_simulation' ? 'Посещена · демо'
+            : stop.visitEvidence?.method === 'gps' ? 'Посещена · GPS' : 'Отмечена вручную ранее'
             : multiple ? 'Посещена' : 'Посещение отмечено')
             : stop.skippedAt ? (multiple ? 'Пропущена' : 'Посещение пропущено') : 'Ожидает посещения'}
         </Text>
-        {actual ? <Text style={styles.muted}>Отметка · {actual}</Text> : null}
+        {actual ? <Text style={styles.muted}>{stop.visitEvidence?.method === 'demo_simulation' ? 'Время в демо' : 'Отметка'} · {actual}</Text> : null}
         {stop.skipReason ? <Text style={styles.body}>Причина · {stop.skipReason}</Text> : null}
         {canMark && !done && !skipOpen ? <View style={styles.actions}>
           {!automatic && <RouteButton label={'Точка посещена · ' + stop.destination} primary disabled={disabled}

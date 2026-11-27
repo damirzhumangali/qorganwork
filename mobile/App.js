@@ -10,6 +10,7 @@ import AuthScreens from './src/AuthScreens';
 import DemoEntry, { DemoRoleSwitch } from './src/DemoEntry';
 import { createDemoTrips } from './src/demoTrips';
 import demoTripStorage from './src/demoTripStorage';
+import useDemoAutoVisits from './src/useDemoAutoVisits';
 import DocumentsScreen from './src/DocumentsScreen';
 import AccountantScreen, { accountantDemoTabs } from './src/AccountantScreen';
 import OfficeScreens from './src/OfficeScreens';
@@ -280,6 +281,7 @@ function Workspace() {
   const [selectedId, setSelectedId] = useState(null);
   const [storageError, setStorageError] = useState(false);
   const [storageAvailable, setStorageAvailable] = useState(true);
+  const demoVisits = useDemoAutoVisits(DEMO_ONLY && !session && demoTasks !== null && savedQuickAccess !== undefined, employeeDemoTrips);
   const request = useCallback((path, options) => {
     const token = sessionRef.current?.token;
     if (!token) return Promise.reject(new Error(DEMO_ONLY
@@ -898,6 +900,17 @@ function Workspace() {
             </View>
           </View>
           {DEMO_ONLY && !session && <DemoRoleSwitch role={role} onSelectRole={switchRole} />}
+          {DEMO_ONLY && !session && demoVisits.notice && <View accessibilityLiveRegion="polite"
+            style={{ marginHorizontal: 16, marginBottom: 8, padding: 12, backgroundColor: '#E7F7EE', borderRadius: 12 }}>
+            <Text style={{ color: '#17694B', fontSize: 14, fontWeight: '700' }}>Местоположение определено · демо</Text>
+            <Text style={{ color: '#35584A', fontSize: 13, lineHeight: 19 }} numberOfLines={2}>
+              {demoVisits.notice.marked > 1 ? `Автоматически отмечено объектов: ${demoVisits.notice.marked}`
+                : demoVisits.notice.destination ? `${demoVisits.notice.destination} · посещение отмечено`
+                  : 'Посещение отмечено автоматически'}
+            </Text>
+            <Text style={{ color: '#35584A', fontSize: 12 }}>Учебная имитация, без проверки GPS</Text>
+          </View>}
+          {DEMO_ONLY && !session && demoVisits.error ? <Text accessibilityRole="alert" style={styles.storageWarning}>{demoVisits.error}</Text> : null}
           {!session && storageError && <Text accessibilityRole="alert" style={styles.storageWarning}>Локальное сохранение недоступно.</Text>}
           {networkError ? <Text accessibilityRole="alert" style={styles.storageWarning}>{networkError}</Text> : null}
           {syncIssue && (
