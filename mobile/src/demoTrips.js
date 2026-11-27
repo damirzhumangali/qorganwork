@@ -1,4 +1,5 @@
 import { tripBudgetTotals } from './tripBudgetCalculation';
+import { handleDemoDocuments } from './demoDocuments';
 import { accountingTrip, handleDemoAccounting } from './demoAccounting';
 
 const STORAGE_KEY = 'qwork.demo-trips.v1';
@@ -46,6 +47,9 @@ export function createDemoTrips(storage, now = () => new Date().toISOString()) {
       return copy(result);
     };
     const nextId = () => String(state.nextId++);
+
+    const documents = await handleDemoDocuments({ state, role, path, method, body, now, nextId, save, stages });
+    if (documents !== null) return documents;
 
     const accounting = await handleDemoAccounting({ state, role, path, method, body, now, nextId, save, stages });
     if (accounting !== null) return accounting;

@@ -9,6 +9,7 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import AuthScreens from './src/AuthScreens';
 import DemoEntry, { DemoRoleSwitch } from './src/DemoEntry';
 import { createDemoTrips } from './src/demoTrips';
+import DocumentsScreen from './src/DocumentsScreen';
 import AccountantScreen, { accountantDemoTabs } from './src/AccountantScreen';
 import OfficeScreens from './src/OfficeScreens';
 import ContractsScreen from './src/ContractsScreen';
@@ -924,6 +925,8 @@ function Workspace() {
               <Profile session={session} role={role} request={request} onSignOut={signOut} onDemoRole={switchRole} push={push}
                 onQuickAccess={() => setSetupSession(session)}
                 onTasks={() => navigate(accountant ? (DEMO_ONLY && !session ? 'accounting' : 'contracts') : 'tasks')} onShifts={() => navigate('shifts')} />
+            ) : page === 'documents' && DEMO_ONLY && !session && ['employee', 'accountant'].includes(role) ? (
+              <DocumentsScreen key={role} role={role} request={accountant ? accountantDemoTrips : employeeDemoTrips} onNavigate={navigate} />
             ) : accountant ? (
               DEMO_ONLY && !session
                 ? <AccountantScreen key={page} request={accountantDemoTrips} section={page} onSectionChange={navigate} />
@@ -1006,7 +1009,7 @@ function Workspace() {
                 ...(role === 'employee'
                   ? [['shifts', 'Рабочее время', 'clock'], ['trips', 'Выезды', 'briefcase']]
                   : [['field-operations', 'Выезды', 'briefcase'], ['analytics', 'Аналитика', 'chart']]),
-                ['profile', 'Профиль', 'user'],
+                DEMO_ONLY && !session && role === 'employee' ? ['documents', 'Документы', 'clipboard'] : ['profile', 'Профиль', 'user'],
               ]).map(([key, label, icon]) => {
                 const active = page === key || (!accountant && key === 'home' && ['team','planning','operations','contracts'].includes(page));
                 return (

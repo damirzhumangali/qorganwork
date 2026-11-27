@@ -10,7 +10,7 @@ import ContractsScreen from './ContractsScreen';
 
 export const accountantDemoTabs = [
   ['accounting', 'Главная', 'home'], ['accounting-review', 'Проверка', 'check'],
-  ['accounting-advances', 'Авансы', 'briefcase'], ['accounting-reports', 'Отчёты', 'chart'], ['contracts', 'Договоры', 'clipboard'],
+  ['accounting-advances', 'Авансы', 'briefcase'], ['accounting-reports', 'Отчёты', 'chart'], ['documents', 'Документы', 'clipboard'],
 ];
 const statuses = { awaiting_approval: 'На согласовании', awaiting_employee: 'На уточнении', confirmed: 'Согласована', rejected: 'Отклонена' };
 const paymentLabels = { advance: 'Аванс', payment: 'Доплата', refund: 'Возврат' };
@@ -79,8 +79,8 @@ function ReviewOffer({ offer, busy, onAction }) {
     </Card>
   </>;
 }
-function TransactionForm({ trip, kind, busy, onSave, onCancel }) {
-  const initial = kind === 'advance' ? trip.finance.remainingAdvance : Math.abs(trip.finance.balance);
+export function TransactionForm({ trip, kind, busy, onSave, onCancel, maximum }) {
+  const initial = maximum ?? (kind === 'advance' ? trip.finance.remainingAdvance : Math.abs(trip.finance.balance));
   const [amount, setAmount] = useState(String(initial)); const [note, setNote] = useState('');
   const [day, setDay] = useState(() => new Date(accountingDay(new Date()) + 'T12:00:00+05:00'));
   const submission = useRef(null);
@@ -182,7 +182,7 @@ export default function AccountantScreen({ request, section, onSectionChange }) 
   const reports = trips.filter(pendingReport);
   const overdue = (data?.contracts ?? []).flatMap(contract => contract.payments).filter(row => row.outstandingAmount > 0 && row.dueOn < accountingDay(new Date()));
   const item = selected?.type === 'offer' ? offers.find(offer => offer.id === selected.id) : trips.find(trip => trip.id === selected?.id);
-  const title = accountantDemoTabs.find(([key]) => key === section)?.[1] ?? 'Главная';
+  const title = accountantDemoTabs.find(([key]) => key === section)?.[1] ?? (section === 'contracts' ? 'Договоры' : 'Главная');
   return <ScrollView ref={scroll} contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
     <View style={styles.heading}><Text accessibilityRole="header" style={styles.title}>{selected ? 'Карточка поездки' : section === 'accounting' ? 'Кабинет бухгалтера' : title}</Text>
       <Text style={styles.muted}>Демо · данные общие для ролей в этом браузере. Без переводов денег и связи с 1С.</Text></View>
@@ -200,6 +200,7 @@ export default function AccountantScreen({ request, section, onSectionChange }) 
             ['accounting-reports', 'Отчёты и расчёты', reports.length, 'chart'], ['contracts', 'Просроченные оплаты', overdue.length, 'calendar'],
           ].map(([key, label, count, icon]) => <Pressable key={key} accessibilityRole="button" accessibilityLabel={`${label} · ${count}`}
             onPress={() => onSectionChange(key)} style={styles.tile}><Icon name={icon} size={23} /><Text style={styles.tileNumber}>{count}</Text><Text style={styles.muted}>{label}</Text></Pressable>)}</View>
+          <Action primary onPress={() => onSectionChange('documents')}>Заявления и документы на подпись</Action>
           <Text accessibilityRole="header" style={styles.cardTitle}>Ближайшие действия</Text>
           {waiting.slice(0, 2).map(offer => <Record key={'o'+offer.id} item={offer} status="Проверить расходы" amount={offer.estimate.total} onPress={() => open('offer', offer.id)} />)}
           {advances.slice(0, 1).map(trip => <Record key={'a'+trip.id} item={trip} status="Выдать аванс" amount={trip.finance.remainingAdvance} onPress={() => open('trip', trip.id)} />)}
