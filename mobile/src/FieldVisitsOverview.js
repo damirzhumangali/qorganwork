@@ -191,7 +191,7 @@ export default function FieldVisitsOverview({ tasks = [], trips = [], offers = [
       && (employee || !offer.selfRequested || offer.status !== 'awaiting_employee' || offer.scheduleFrom))
       .map(offer => offerEntry(offer, employee, canDispatch, () => onOffer(offer.id))),
     ...requests.filter(item => item.status !== 'approved').map(item => requestEntry(item, employee, () => onRequest(item.id))),
-    ...trips.map(trip => tripEntry(trip, employee, () => onTrip(trip.id), routeByTrip.get(String(trip.id)) ?? [])),
+    ...trips.map(trip => tripEntry(trip, employee, () => onTrip(trip.id), trip.stops ?? routeByTrip.get(String(trip.id)) ?? [])),
     ...standaloneTasks.map(task => taskEntry(task, employee, taskStatuses[task.status], onTask && (() => onTask(task.id)))),
   ].filter(entry => filter === 'all' || entry.kind === filter);
   const action = entries.filter(entry => entry.bucket === 'action');

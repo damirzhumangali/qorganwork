@@ -5,14 +5,14 @@ import 'leaflet/dist/leaflet.css';
 
 const MapContext = createContext(null);
 
-export default function MapView({ initialRegion, onPress, children, style, accessibilityLabel }) {
+export default function MapView({ initialRegion, initialZoom = 13, onPress, children, style, accessibilityLabel }) {
   const container = useRef(null);
   const handler = useRef(onPress);
   handler.current = onPress;
   const [map, setMap] = useState(null);
   useEffect(() => {
     const instance = L.map(container.current, { scrollWheelZoom: false }).setView(
-      [initialRegion.latitude, initialRegion.longitude], 13);
+      [initialRegion.latitude, initialRegion.longitude], initialZoom);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>', maxZoom: 19,
     }).addTo(instance);

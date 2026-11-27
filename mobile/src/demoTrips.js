@@ -1,6 +1,7 @@
 import { tripBudgetTotals } from './tripBudgetCalculation';
 import { handleDemoDocuments } from './demoDocuments';
 import { accountingTrip, handleDemoAccounting } from './demoAccounting';
+import { handleDemoVisits, tripWithVisitSites } from './demoVisits';
 
 const STORAGE_KEY = 'qwork.demo-trips.v1';
 const employee = { employeeId: 'demo-employee', employeeName: 'Демо-сотрудник' };
@@ -52,6 +53,9 @@ export function createDemoTrips(storage, now = () => new Date().toISOString()) {
     };
     const nextId = () => String(state.nextId++);
 
+    const visit = await handleDemoVisits({ state, role, path, method, body, now, save });
+    if (visit !== null) return visit;
+
     const documents = await handleDemoDocuments({ state, role, path, method, body, now, nextId, save, stages });
     if (documents !== null) return documents;
 
@@ -65,7 +69,7 @@ export function createDemoTrips(storage, now = () => new Date().toISOString()) {
         supportsTripRoutes: true, supportsSingleStopRoutes: true,
         supportsTripImport: false, supportsTripScheduleImport: false,
       });
-      if (path === '/trips') return copy({ trips: state.trips.map(accountingTrip) });
+      if (path === '/trips') return copy({ trips: state.trips.map(trip => tripWithVisitSites(accountingTrip(trip), state.visitSites)) });
       if (path === '/trip-requests') return { requests: [] };
       if (path === '/trip-destinations') return { objects: [], contracts: [] };
       if (path === '/trip-approval-settings') return {
@@ -75,7 +79,7 @@ export function createDemoTrips(storage, now = () => new Date().toISOString()) {
       if (reportMatch) {
         const trip = state.trips.find(item => item.id === reportMatch[1]);
         requireValue(trip, 'Командировка не найдена.');
-        return copy({ trip: accountingTrip(trip), tasks: [], summary: { completed: 0, awaitingReview: 0,
+        return copy({ trip: tripWithVisitSites(accountingTrip(trip), state.visitSites), tasks: [], summary: { completed: 0, awaitingReview: 0,
           elapsedMinutes: trip.startedAt && trip.finishedAt
             ? Math.max(0, Math.round((Date.parse(trip.finishedAt) - Date.parse(trip.startedAt)) / 60000)) : null } });
       }
@@ -189,7 +193,7 @@ export function createDemoTrips(storage, now = () => new Date().toISOString()) {
       return save({ offer: offerView(offer) });
     }
 
-    const actionMatch = path.match(/^\/trips\/([^/]+)\/(start|finish|actual-expenses|stops\/([^/]+))$/);
+    const actionMatch = path.match(/^\/trips\/([^/]+)\/(start|finish|actual-expenses)$/);
     if (method === 'POST' && actionMatch) {
       requireValue(role === 'employee', 'Отметки поездки вносит сотрудник.');
       const trip = state.trips.find(item => item.id === actionMatch[1]);
@@ -213,17 +217,6 @@ export function createDemoTrips(storage, now = () => new Date().toISOString()) {
           actualTotal: trip.estimate.workTotal + expensesTotal, revision: trip.actualExpenses.revision + 1,
           note: String(body.note ?? '').trim(), updatedAt: timestamp };
         return save({ actualExpenses: trip.actualExpenses });
-      } else {
-        const stop = trip.stops.find(item => item.id === actionMatch[3]);
-        requireValue(trip.status === 'active' && stop && !stop.visitedAt && !stop.skippedAt, 'Эта остановка недоступна для отметки.');
-        requireValue(['visited', 'skipped'].includes(body.outcome), 'Выберите результат посещения.');
-        if (body.outcome === 'visited') stop.visitedAt = timestamp;
-        else {
-          const reason = String(body.reason ?? '').trim();
-          requireValue(reason, 'Укажите причину пропуска.');
-          stop.skippedAt = timestamp; stop.skipReason = reason;
-        }
-        return save({ stop });
       }
       return save({ trip });
     }

@@ -17,6 +17,7 @@
     "web": "expo start --web",
     "build:web": "expo export --platform web",
     "test:planning": "node --test tests/trip-planning.cjs",
+    "test:visits": "node --test tests/trip-visits.cjs",
     "test:accounting": "node --test tests/demo-accounting.cjs",
     "test:documents": "node --test tests/demo-documents.cjs"
   },

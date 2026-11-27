@@ -133,7 +133,8 @@ export function TripRouteEditor({ stops = [], value = [], onChange, start, end, 
   </View>;
 }
 
-export function TripRouteSummary({ stops = [], active = false, onMark, busy = false, offline = false, error }) {
+export function TripRouteSummary({ stops = [], active = false, onMark, busy = false, offline = false, error,
+  automatic = false, renderStopExtra, children }) {
   const [skipId, setSkipId] = useState(null);
   const [reason, setReason] = useState('');
   const [sending, setSending] = useState(false);
@@ -170,6 +171,7 @@ export function TripRouteSummary({ stops = [], active = false, onMark, busy = fa
     <Text accessibilityRole="header" style={styles.title}>{multiple ? 'Маршрут поездки' : 'Посещение объекта'}</Text>
     {multiple && <Text style={styles.muted}>Посещено {visited} из {stops.length}
       {skipped > 0 ? ' · Пропущено ' + skipped : ''}</Text>}
+    {children}
     {canMark && offline && <Text style={styles.muted}>Для отметки точек нужна связь.</Text>}
     {stops.map((stop, index) => {
       const planned = dateLabel(stop.plannedAt);
@@ -180,14 +182,15 @@ export function TripRouteSummary({ stops = [], active = false, onMark, busy = fa
         <StopHeading index={index} destination={stop.destination} multiple={multiple} />
         <Text style={styles.muted}>{planned ? 'По плану · ' + planned : 'Время посещения ещё не согласовано'}</Text>
         <Text style={[styles.badge, stop.visitedAt && styles.visited, stop.skippedAt && styles.skipped]}>
-          {stop.visitedAt ? (multiple ? 'Посещена' : 'Посещение отмечено')
+          {stop.visitedAt ? (automatic ? stop.visitEvidence?.method === 'gps' ? 'Посещена · GPS' : 'Отмечена вручную ранее'
+            : multiple ? 'Посещена' : 'Посещение отмечено')
             : stop.skippedAt ? (multiple ? 'Пропущена' : 'Посещение пропущено') : 'Ожидает посещения'}
         </Text>
         {actual ? <Text style={styles.muted}>Отметка · {actual}</Text> : null}
         {stop.skipReason ? <Text style={styles.body}>Причина · {stop.skipReason}</Text> : null}
         {canMark && !done && !skipOpen ? <View style={styles.actions}>
-          <RouteButton label={'Точка посещена · ' + stop.destination} primary disabled={disabled}
-            onPress={() => { void mark(stop.id, 'visited'); }}>Посетил</RouteButton>
+          {!automatic && <RouteButton label={'Точка посещена · ' + stop.destination} primary disabled={disabled}
+            onPress={() => { void mark(stop.id, 'visited'); }}>Посетил</RouteButton>}
           <RouteButton label={'Пропустить точку · ' + stop.destination} disabled={disabled}
             onPress={() => { setSkipId(stop.id); setReason(''); }}>Пропустить</RouteButton>
         </View> : null}
@@ -201,6 +204,7 @@ export function TripRouteSummary({ stops = [], active = false, onMark, busy = fa
             <RouteButton disabled={busy || sending} onPress={closeSkip}>Отмена</RouteButton>
           </View>
         </> : null}
+        {renderStopExtra?.(stop)}
       </View>;
     })}
     {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}

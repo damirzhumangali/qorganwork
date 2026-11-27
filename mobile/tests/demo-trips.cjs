@@ -107,11 +107,13 @@ test('route requires visit times, marks each stop, and prevents premature finish
   const url = `/trips/${approved.tripId}`;
   await post(api, 'employee', url + '/start');
   await assert.rejects(post(api, 'employee', url + '/finish'), /остановки/);
-  await post(api, 'employee', url + '/stops/' + offer.stops[0].id, { outcome: 'visited' });
-  await post(api, 'employee', url + '/stops/' + offer.stops[1].id, { outcome: 'skipped', reason: 'Закрыт' });
+  await assert.rejects(post(api, 'employee', url + '/stops/' + offer.stops[0].id,
+    { outcome: 'visited', requestId: 'manual', expectedRevision: 0 }), /автоматически/);
+  await post(api, 'employee', url + '/stops/' + offer.stops[0].id, { outcome: 'skipped', reason: 'Закрыт', requestId: 'skip1', expectedRevision: 0 });
+  await post(api, 'employee', url + '/stops/' + offer.stops[1].id, { outcome: 'skipped', reason: 'Закрыт', requestId: 'skip2', expectedRevision: 0 });
   await post(api, 'employee', url + '/finish');
   const { trip } = await env.reload()('manager', url + '/report');
-  assert.ok(trip.stops[0].visitedAt);
+  assert.equal(trip.stops[0].visitedAt, null);
   assert.equal(trip.stops[1].skipReason, 'Закрыт');
 });
 
