@@ -4,7 +4,7 @@ import { randomUUID } from 'expo-crypto';
 import { colors, Icon } from './ui';
 import DeadlinePicker, { deadlineToIso } from './DeadlinePicker';
 import { TripBudgetFields, TripBudgetSummary, tripBudgetDraft, tripBudgetPayload } from './TripBudget';
-import { KURMANGAZY_DESTINATIONS, TRIP_CITIES, organizationKey, tripSiteLocation } from './TripDestinations';
+import { KURMANGAZY_DESTINATIONS, TRIP_PLACES, organizationKey, organizationTripStops, tripSiteLocation } from './TripDestinations';
 import DispatcherTripOffer from './DispatcherTripOffer';
 import { TripOfferCard, TripOfferHistory } from './TripOfferCard';
 import FieldVisitsOverview, { TripOfferPreview } from './FieldVisitsOverview';
@@ -356,7 +356,7 @@ export function VisitOptionPicker({ label, icon, options, selected, onSelect, di
   </View>;
 }
 
-const TRIP_CITY_OPTIONS = [...TRIP_CITIES, { id: '', label: 'Без города' }];
+const TRIP_CITY_OPTIONS = [...TRIP_PLACES, { id: '', label: 'Не указывать' }];
 
 function shiftVisits(visits, offset) {
   return visits.map(stop => {
@@ -390,9 +390,9 @@ function TripForm({ request, objects = [], onCreated, onCancel, offline = false,
   const busy = action.busy || catalogAction.busy || templateAction.busy;
   const blocked = offline || loadingCapabilities || Boolean(capabilitiesError);
   const catalog = new Map(KURMANGAZY_DESTINATIONS.map(option => [organizationKey(option.label), option]));
-  for (const { name } of companyOrganizations) {
+  for (const { name, city, address } of companyOrganizations) {
     const key = organizationKey(name);
-    if (!catalog.has(key)) catalog.set(key, { id: name, label: name });
+    if (!catalog.has(key)) catalog.set(key, { id: name, label: name, city, address, detail: address || city });
   }
   for (const name of template?.organizations ?? []) {
     const key = organizationKey(name);
@@ -402,6 +402,8 @@ function TripForm({ request, objects = [], onCreated, onCancel, offline = false,
   const atLimit = organizations.length >= MAX_TRIP_ORGANIZATIONS;
   const canAddOrganization = Boolean(onAddOrganization && !blocked && !busy && !atLimit);
   const selectedObject = objects.find(object => String(object.id) === objectId);
+  const objectAutomaticCity = selectedObject?.city || tripSiteLocation(selectedObject?.address).city;
+  const objectCity = objectAutomaticCity || cityName;
   const selectedContract = contracts.find(contract => String(contract.id) === contractId);
   const objectsById = new Map(objects.map(object => [String(object.id), object]));
   const contractPlaces = new Map((selectedContract?.objects ?? []).map(object => {
@@ -424,10 +426,15 @@ function TripForm({ request, objects = [], onCreated, onCancel, offline = false,
   if (placeSource === 'contract') {
     routeStops = contractRouteStops(selectedContract, contractCity);
   } else if (placeSource === 'directory' && selectedObject) {
-    routeStops = [{ id: `object:${objectId}`, destination: withCity(selectedObject.name) }];
+    routeStops = [{ id: `object:${objectId}`, city: objectCity, automaticCity: objectAutomaticCity,
+      destination: objectCity ? `${objectCity} · ${selectedObject.name}` : selectedObject.name }];
+  } else if (placeSource === 'organizations') {
+    routeStops = organizationTripStops(organizations, organizationOptions, cityName);
   } else {
     routeStops = visitNames.map(name => ({ id: `${placeSource}:${name}`, destination: withCity(name) }));
   }
+  const automaticCities = [...new Set(routeStops.map(stop => stop.automaticCity).filter(Boolean))];
+  const needsManualCity = !routeStops.length || routeStops.some(stop => !stop.automaticCity);
   const placeTooLong = routeStops.some(stop => Array.from(stop.destination).length > 300);
   const stopsById = new Map(routeStops.map(stop => [stop.id, stop]));
   const route = visitSchedule.filter(stop => stopsById.has(stop.id));
@@ -439,7 +446,7 @@ function TripForm({ request, objects = [], onCreated, onCancel, offline = false,
     place = { contractId, objectIds: route.map(stop => stopsById.get(stop.id).objectId),
       ...(contractCity ? { city: contractCity } : {}) };
   } else if (placeSource === 'directory' && selectedObject) {
-    place = { objectId, scheduleVisit: true, ...(cityName ? { city: cityName } : {}) };
+    place = { objectId, scheduleVisit: true, ...(objectCity ? { city: objectCity } : {}) };
   } else if (route.length) {
     place = { destinations: route.map(stop => stopsById.get(stop.id).destination) };
   } else if (placeSource === 'organizations' && cityName) {
@@ -558,11 +565,6 @@ function TripForm({ request, objects = [], onCreated, onCancel, offline = false,
           </Text>}
           <Notice message={templateAction.error} />
         </View>}
-        {placeSource !== 'contract' && <>
-          <Text style={styles.label}>Город</Text>
-          <VisitOptionPicker label="Выбрать город" icon="pin" options={TRIP_CITY_OPTIONS}
-            selected={cityName || undefined} onSelect={setCityName} disabled={busy} visibleLimit={TRIP_CITY_OPTIONS.length} />
-        </>}
         {placeSource === 'contract' ? <>
           <Text style={styles.label}>Договор и объекты</Text>
           <VisitOptionPicker label="Выбрать договор" icon="clipboard" selected={contractId} onSelect={chooseContract}
@@ -588,7 +590,9 @@ function TripForm({ request, objects = [], onCreated, onCancel, offline = false,
             <Button disabled={busy} onPress={() => setPlaceSource('organizations')}>Указать другое место</Button>
           </View>
         </> : <>
-          <Text style={styles.muted}>Можно указать только город или добавить организации и объекты ниже.</Text>
+          <Text style={styles.muted}>{placeSource === 'manual'
+            ? 'Укажите место поездки и населённый пункт.'
+            : 'Выберите организацию или объект — населённый пункт подставится по адресу.'}</Text>
           <Text style={styles.label}>Организации и объекты</Text>
         </>}
         <Notice message={destinationsError} />
@@ -613,9 +617,12 @@ function TripForm({ request, objects = [], onCreated, onCancel, offline = false,
           </View>)}
           {organizations.length > 0 && <View style={styles.inset}>
             <Text style={styles.label}>Организации в поездке</Text>
-            {organizations.map(organization => <Text key={organization} style={styles.body}>
-              {KURMANGAZY_DESTINATIONS.find(place => place.id === organization)?.shortLabel ?? organization}
-            </Text>)}
+            {organizations.map(organization => {
+              const stop = stopsById.get(`organizations:${organization}`);
+              return <Text key={organization} style={styles.body}>
+                {catalog.get(organizationKey(organization))?.shortLabel ?? stop?.name ?? organization}{stop?.city ? ` · ${stop.city}` : ''}
+              </Text>;
+            })}
           </View>}
           {atLimit && <Text style={styles.warning}>
             В маршруте максимум {MAX_TRIP_ORGANIZATIONS} организаций. Уберите одну, чтобы добавить другую.
@@ -626,6 +633,23 @@ function TripForm({ request, objects = [], onCreated, onCancel, offline = false,
           options={objects.map(object => ({ id: String(object.id), label: object.name, detail: object.address }))} />}
         {placeSource === 'manual' && <Field label="Объект или адрес" value={destination} onChange={setDestination} limit={300}
           disabled={busy} placeholder="Укажите место поездки" />}
+        {placeSource !== 'contract' && <>
+          {automaticCities.length > 0 && <View style={styles.inset} accessibilityLiveRegion="polite">
+            <Text style={styles.label}>{automaticCities.length === 1 ? 'Населённый пункт' : 'Населённые пункты'}</Text>
+            <Text style={styles.body}>{automaticCities.join(' · ')}</Text>
+            <Text style={styles.muted}>{automaticCities.length === 1
+              ? 'Подставлен автоматически по выбранному месту.'
+              : 'Для каждой организации в маршруте указан свой населённый пункт.'}</Text>
+          </View>}
+          {needsManualCity && <>
+            <Text style={styles.label}>{automaticCities.length ? 'Для организаций без адреса' : 'Город / населённый пункт'}</Text>
+            <Text style={styles.muted}>{routeStops.length
+              ? 'В справочнике нет адреса этого места. Населённый пункт можно выбрать вручную.'
+              : 'Можно выбрать только населённый пункт, если организация пока неизвестна.'}</Text>
+            <VisitOptionPicker label="Выбрать населённый пункт" icon="pin" options={TRIP_CITY_OPTIONS}
+              selected={cityName || undefined} onSelect={setCityName} disabled={busy} visibleLimit={TRIP_CITY_OPTIONS.length} />
+          </>}
+        </>}
         {placeSource !== 'contract' && <View style={styles.choices}>
           {contracts.length > 0 && <Button disabled={busy} onPress={useContract}>Из договора</Button>}
           {placeSource !== 'organizations' && <Button disabled={busy}

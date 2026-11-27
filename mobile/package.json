@@ -13,6 +13,7 @@
     "test:review": "node --test tests/dispatcher-review.cjs",
     "test:web": "node --test tests/web-storage.cjs",
     "test:demo-trips": "node --test tests/demo-trips.cjs",
+    "test:destinations": "node --test tests/trip-destinations.cjs",
     "web": "expo start --web",
     "build:web": "expo export --platform web"
   },

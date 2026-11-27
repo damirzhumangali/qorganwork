@@ -1,4 +1,4 @@
-import { organizationKey, splitTripDestination, TRIP_CITIES } from './TripDestinations';
+import { organizationKey, splitTripDestination, tripSiteLocation, TRIP_PLACES } from './TripDestinations';
 import { tripBudgetDraft } from './TripBudget';
 
 export const MAX_TRIP_ORGANIZATIONS = 30;
@@ -63,17 +63,22 @@ export function tripFormTemplate(trip, objects = [], organizationOptions = [], c
   }
 
   if (stops.length) {
-    const names = stops.map((stop, index) => commonCity ? places[index].name : stop.destination);
     const catalog = new Map(organizationOptions.map(option => [organizationKey(option.label ?? option.id), option.id]));
+    const locatedNames = new Set(organizationOptions.filter(option => option.city || tripSiteLocation(option.address).city)
+      .map(option => organizationKey(option.label ?? option.id)));
+    // Strip each known organization's location independently in a multi-city route.
+    // Keep a recorded prefix on unknown organizations so their location is not lost.
+    const names = stops.map((stop, index) => commonCity || locatedNames.has(organizationKey(places[index].name))
+      ? places[index].name : stop.destination);
     const matched = names.map(name => catalog.get(organizationKey(name)) ?? name);
     // Keep distinct recorded stops if normalization maps them to the same catalog entry.
-    const organizations = new Set(matched).size === names.length ? matched : names;
+    const organizations = new Set(matched).size === names.length ? matched : stops.map(stop => stop.destination);
     return { ...draft, organizations, visitSchedule: organizations.map((name, index) => ({
       id: `organizations:${name}`, plannedAt: stops[index].plannedAt ?? null,
     })) };
   }
 
-  const city = TRIP_CITIES.find(option => option.id === legacyPlace.name && !legacyPlace.city);
+  const city = TRIP_PLACES.find(option => option.id === legacyPlace.name && !legacyPlace.city);
   if (city) return { ...draft, cityName: city.id };
   if (!legacyPlace.name) return draft;
   return { ...draft, placeSource: 'manual', destination: legacyPlace.name,
