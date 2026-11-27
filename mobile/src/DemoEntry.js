@@ -5,6 +5,7 @@ import { colors, Icon } from './ui';
 const roles = [
   { id: 'employee', label: 'Сотрудник', icon: 'user', description: 'Мои задачи, ход работ и фотоотчёты' },
   { id: 'manager', label: 'Руководитель', icon: 'users', description: 'Заявки команды и проверка результатов' },
+  { id: 'accountant', label: 'Бухгалтер', icon: 'clipboard', description: 'Проверка расходов, авансы и расчёты по поездкам' },
 ];
 
 export function DemoRoleSwitch({ role, onSelectRole }) {

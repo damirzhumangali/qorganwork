@@ -1,8 +1,13 @@
 import { tripBudgetTotals } from './tripBudgetCalculation';
+import { accountingTrip, handleDemoAccounting } from './demoAccounting';
 
 const STORAGE_KEY = 'qwork.demo-trips.v1';
 const employee = { employeeId: 'demo-employee', employeeName: 'Демо-сотрудник' };
-const stage = { position: 1, title: 'Руководитель', approverId: 'demo-manager', approverName: 'Демо-руководитель' };
+const stages = [
+  { position: 1, title: 'Бухгалтер · проверка расходов', approverId: 'demo-accountant', approverName: 'Демо-бухгалтер' },
+  { position: 2, title: 'Руководитель', approverId: 'demo-manager', approverName: 'Демо-руководитель' },
+];
+const freshStages = () => stages.map((stage, index) => ({ ...stage, status: index ? 'pending' : 'waiting' }));
 const expenseKeys = ['transport', 'lodging', 'meals', 'other'];
 const copy = value => JSON.parse(JSON.stringify(value));
 
@@ -23,7 +28,7 @@ export function createDemoTrips(storage, now = () => new Date().toISOString()) {
   let queue = Promise.resolve();
 
   async function handle(role, path, { method = 'GET', body = {} } = {}) {
-    requireValue(role === 'employee' || role === 'manager', 'Выберите роль для демонстрации.');
+    requireValue(['employee', 'manager', 'accountant'].includes(role), 'Выберите роль для демонстрации.');
     let state;
     try {
       const saved = await storage.getItem(STORAGE_KEY);
@@ -33,14 +38,17 @@ export function createDemoTrips(storage, now = () => new Date().toISOString()) {
     } catch {
       throw new Error('Не удалось прочитать демо-командировки. Обновите страницу и попробуйте снова.');
     }
-    const manager = role === 'manager';
-    const offerView = offer => ({ ...offer, canDecideApproval: manager && offer.status === 'awaiting_approval' });
+    const offerView = offer => ({ ...offer, canDecideApproval: role !== 'employee' && offer.status === 'awaiting_approval'
+      && offer.approvalStages?.find(stage => stage.status === 'waiting')?.approverId === `demo-${role}` });
     const save = async result => {
       try { await storage.setItem(STORAGE_KEY, JSON.stringify(state)); }
       catch { throw new Error('Не удалось сохранить командировку в браузере. Освободите место и попробуйте снова.'); }
       return copy(result);
     };
     const nextId = () => String(state.nextId++);
+
+    const accounting = await handleDemoAccounting({ state, role, path, method, body, now, nextId, save, stages });
+    if (accounting !== null) return accounting;
 
     if (method === 'GET') {
       if (path === '/trip-offers') return copy({
@@ -49,24 +57,24 @@ export function createDemoTrips(storage, now = () => new Date().toISOString()) {
         supportsTripRoutes: true, supportsSingleStopRoutes: true,
         supportsTripImport: false, supportsTripScheduleImport: false,
       });
-      if (path === '/trips') return copy({ trips: state.trips });
+      if (path === '/trips') return copy({ trips: state.trips.map(accountingTrip) });
       if (path === '/trip-requests') return { requests: [] };
       if (path === '/trip-destinations') return { objects: [], contracts: [] };
       if (path === '/trip-approval-settings') return {
-        configured: true, supportsSingleApprover: true, canEdit: false, stages: [{ ...stage }],
+        configured: true, supportsSingleApprover: false, canEdit: false, stages: copy(stages),
       };
       const reportMatch = path.match(/^\/trips\/([^/]+)\/report$/);
       if (reportMatch) {
         const trip = state.trips.find(item => item.id === reportMatch[1]);
         requireValue(trip, 'Командировка не найдена.');
-        return copy({ trip, tasks: [], summary: { completed: 0, awaitingReview: 0,
+        return copy({ trip: accountingTrip(trip), tasks: [], summary: { completed: 0, awaitingReview: 0,
           elapsedMinutes: trip.startedAt && trip.finishedAt
             ? Math.max(0, Math.round((Date.parse(trip.finishedAt) - Date.parse(trip.startedAt)) / 60000)) : null } });
       }
     }
 
     if (method === 'POST' && path === '/trip-organizations') {
-      requireValue(!manager, 'Организацию добавляет сотрудник.');
+      requireValue(role === 'employee', 'Организацию добавляет сотрудник.');
       const name = String(body.name ?? '').trim();
       requireValue(name && name.length <= 200, 'Укажите название организации.');
       let organization = state.organizations.find(item => item.name.toLocaleLowerCase('ru') === name.toLocaleLowerCase('ru'));
@@ -78,7 +86,7 @@ export function createDemoTrips(storage, now = () => new Date().toISOString()) {
     }
 
     if (method === 'POST' && path === '/trip-offers') {
-      requireValue(!manager, 'Командировку создаёт сотрудник.');
+      requireValue(role === 'employee', 'Командировку создаёт сотрудник.');
       requireValue(typeof body.requestId === 'string' && body.requestId.length > 0, 'Повторите отправку формы.');
       const previous = state.offers.find(item => item.requestId === body.requestId);
       if (previous) return copy({ offer: offerView(previous) });
@@ -106,31 +114,64 @@ export function createDemoTrips(storage, now = () => new Date().toISOString()) {
         selfRequested: true, status: 'awaiting_approval', destination, purpose,
         comment: String(body.comment ?? '').trim(), plannedStart: body.plannedStart, plannedEnd: body.plannedEnd,
         plannedDays: totals.days, dailyRate: budget.dailyRate, estimate: { ...budget, ...totals }, stops,
-        approvalStages: [{ ...stage, status: 'waiting' }], createdAt: timestamp, updatedAt: timestamp };
+        approvalStages: freshStages(), createdAt: timestamp, updatedAt: timestamp };
       state.offers.unshift(offer);
+      return save({ offer: offerView(offer) });
+    }
+
+    const proposalMatch = path.match(/^\/trip-offers\/([^/]+)\/proposal$/);
+    if (method === 'POST' && proposalMatch) {
+      requireValue(role === 'employee', 'Условия изменяет сотрудник.');
+      const offer = state.offers.find(item => item.id === proposalMatch[1]);
+      requireValue(offer && offer.status === 'awaiting_employee' && body.expectedRevision === offer.revision, 'Заявка уже изменена. Откройте её заново.');
+      const budget = amounts(body, ['dailyRate', ...expenseKeys]);
+      requireValue(body.dailyRate != null, 'Укажите ставку за день.');
+      const totals = tripBudgetTotals(budget, body.plannedStart, body.plannedEnd);
+      requireValue(totals.days > 0, 'Окончание поездки должно быть позже начала.');
+      const route = body.stops ?? [];
+      requireValue(route.length === offer.stops.length && new Set(route.map(stop => stop.id)).size === route.length, 'Проверьте маршрут.');
+      const stops = route.map((item, index) => {
+        const original = offer.stops.find(stop => stop.id === item.id); const time = Date.parse(item.plannedAt);
+        requireValue(original && Number.isFinite(time) && time >= Date.parse(body.plannedStart) && time <= Date.parse(body.plannedEnd)
+          && (!index || time > Date.parse(route[index - 1].plannedAt)), 'Проверьте время посещений.');
+        return { ...original, plannedAt: item.plannedAt, position: index + 1 };
+      });
+      Object.assign(offer, { status: 'awaiting_approval', plannedStart: body.plannedStart, plannedEnd: body.plannedEnd,
+        plannedDays: totals.days, dailyRate: budget.dailyRate, estimate: { ...budget, ...totals }, stops,
+        approvalStages: freshStages(), revisionReason: null, revision: offer.revision + 1, updatedAt: now() });
       return save({ offer: offerView(offer) });
     }
 
     const approvalMatch = path.match(/^\/trip-offers\/([^/]+)\/approval$/);
     if (method === 'POST' && approvalMatch) {
-      requireValue(manager, 'Согласование доступно руководителю.');
+      requireValue(role !== 'employee', 'Согласование доступно бухгалтеру и руководителю.');
       const offer = state.offers.find(item => item.id === approvalMatch[1]);
       requireValue(offer, 'Командировка не найдена.');
       requireValue(body.expectedRevision === offer.revision && offer.status === 'awaiting_approval',
         'Командировка уже изменена. Откройте её заново.');
-      requireValue(body.stage === 1 && ['approve', 'reject'].includes(body.action), 'Выберите решение.');
+      const pending = offer.approvalStages.find(stage => stage.status === 'waiting');
+      requireValue(pending?.approverId === `demo-${role}` && body.stage === pending.position, 'Дождитесь своего этапа согласования.');
+      requireValue(['approve', 'reject'].includes(body.action), 'Выберите решение.');
       const reason = String(body.reason ?? '').trim();
       requireValue(body.action !== 'reject' || reason, 'Укажите причину отклонения.');
       const timestamp = now();
-      const approved = body.action === 'approve';
-      offer.status = approved ? 'confirmed' : 'rejected';
-      offer.revision += 1;
-      offer.updatedAt = timestamp;
-      offer.approvalStages = [{ ...stage, status: approved ? 'approved' : 'rejected', decidedAt: timestamp, reason }];
+      pending.status = body.action === 'approve' ? 'approved' : 'rejected';
+      pending.decidedAt = timestamp; pending.reason = reason;
+      offer.approvalHistory = [...(offer.approvalHistory ?? []), copy(pending)];
+      offer.revision += 1; offer.updatedAt = timestamp;
+      const next = offer.approvalStages.find(stage => stage.status === 'pending');
+      const approved = body.action === 'approve' && !next;
+      if (body.action === 'approve') {
+        if (next) next.status = 'waiting';
+        offer.status = approved ? 'confirmed' : 'awaiting_approval';
+      } else if (role === 'accountant') {
+        offer.status = 'awaiting_employee'; offer.revisionReason = reason;
+        offer.previousProposal = { plannedStart: offer.plannedStart, plannedEnd: offer.plannedEnd, estimate: copy(offer.estimate) };
+      } else offer.status = 'rejected';
       if (approved) {
         const id = nextId();
         offer.tripId = id;
-        state.trips.unshift({ id, ...employee, offerId: offer.id, selfRequested: true, status: 'planned',
+        state.trips.unshift({ id, ...employee, sample: Boolean(offer.sample), offerId: offer.id, selfRequested: true, status: 'planned',
           destination: offer.destination, purpose: offer.purpose, comment: offer.comment,
           plannedStart: offer.plannedStart, plannedEnd: offer.plannedEnd, plannedDays: offer.plannedDays,
           estimate: copy(offer.estimate), stops: copy(offer.stops), taskCount: 0, createdAt: timestamp,
@@ -142,7 +183,7 @@ export function createDemoTrips(storage, now = () => new Date().toISOString()) {
 
     const actionMatch = path.match(/^\/trips\/([^/]+)\/(start|finish|actual-expenses|stops\/([^/]+))$/);
     if (method === 'POST' && actionMatch) {
-      requireValue(!manager, 'Отметки поездки вносит сотрудник.');
+      requireValue(role === 'employee', 'Отметки поездки вносит сотрудник.');
       const trip = state.trips.find(item => item.id === actionMatch[1]);
       requireValue(trip, 'Командировка не найдена.');
       const action = actionMatch[2];

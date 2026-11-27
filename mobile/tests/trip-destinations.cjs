@@ -107,8 +107,11 @@ test('automatic destinations persist through employee submission, manager approv
     destinations: routes.map(stop => stop.destination), visitTimes: ['2026-11-28T05:00:00.000Z', '2026-11-29T05:00:00.000Z'],
   } });
   api = createDemoTrips(storage);
-  const { offer: approved } = await api('manager', `/trip-offers/${offer.id}/approval`, { method: 'POST', body: {
+  const { offer: checked } = await api('accountant', `/trip-offers/${offer.id}/approval`, { method: 'POST', body: {
     stage: 1, action: 'approve', expectedRevision: offer.revision,
+  } });
+  const { offer: approved } = await api('manager', `/trip-offers/${offer.id}/approval`, { method: 'POST', body: {
+    stage: 2, action: 'approve', expectedRevision: checked.revision,
   } });
   const { trip } = await createDemoTrips(storage)('employee', `/trips/${approved.tripId}/report`);
   assert.deepEqual(plain(trip.stops.map(stop => stop.destination)), plain(routes.map(stop => stop.destination)));

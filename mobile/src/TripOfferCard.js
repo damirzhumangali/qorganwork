@@ -211,7 +211,7 @@ export function TripOfferCard({ offer, request, employee, offline = false, onCha
           <View style={styles.placeIcon}><Icon name="pin" /></View>
           <View style={styles.headingText}>
             <Text style={styles.muted}>{fromSchedule ? 'По графику выездов'
-              : selfDraft ? 'Черновик из Excel' : 'Командировка от руководителя'}</Text>
+              : selfDraft ? (current.revisionReason ? 'Вернули на уточнение' : 'Черновик командировки') : 'Командировка от руководителя'}</Text>
             <Text accessibilityRole="header" style={styles.title}>
               {tripRouteTitle(stops) ?? (fromSchedule ? place.name : stops[0]?.destination ?? current.destination)}
             </Text>
@@ -219,7 +219,7 @@ export function TripOfferCard({ offer, request, employee, offline = false, onCha
           </View>
         </View>
         <Text accessibilityLiveRegion="polite" style={[styles.badge, current.status === 'confirmed' && styles.confirmedBadge]}>
-          {selfDraft ? 'Черновик' : returned ? 'На уточнении' : statusLabels[current.status]}
+          {returned ? 'На уточнении' : selfDraft ? 'Черновик' : statusLabels[current.status]}
         </Text>
         {current.contractNumber ? <Text style={styles.muted}>Договор {current.contractNumber}</Text> : null}
         {fromSchedule ? <Text style={styles.muted}>
@@ -245,6 +245,7 @@ export function TripOfferCard({ offer, request, employee, offline = false, onCha
         <View style={styles.card}>
           <Text accessibilityRole="header" style={styles.title}>Ваши условия поездки</Text>
           <Text style={styles.muted}>{fromSchedule ? 'Проверьте период поездки, укажите время посещений и расходы.'
+            : returned ? 'Исправьте условия по замечанию и отправьте заявку на согласование повторно.'
             : selfDraft ? 'Добавьте даты, время посещений и расходы, затем отправьте черновик на согласование.'
             : 'Руководитель получит ваш график и дневную ставку на согласование.'}</Text>
           <Text accessibilityRole="header" style={styles.label}>Период командировки</Text>

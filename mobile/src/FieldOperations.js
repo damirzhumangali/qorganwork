@@ -11,6 +11,7 @@ import FieldVisitsOverview, { TripOfferPreview } from './FieldVisitsOverview';
 import { tripRouteTitle, TripRouteEditor, TripRouteSummary, validTripRoute } from './TripRoute';
 import { contractRouteStops, MAX_TRIP_ORGANIZATIONS, tripFormTemplate, tripPlannedBudget } from './TripFormTemplate';
 import { TripActualExpenses } from './TripActualExpenses';
+import TripFinance from './TripFinance';
 import { TripApprovalProgress, TripApprovalReview, TripApprovalSettings } from './TripApprovals';
 import TripImport from './TripImport';
 import TripScheduleImport from './TripScheduleImport';
@@ -972,6 +973,7 @@ function TripReport({ demo = false, id, request, offline, employee, canEditBudge
         {trip.actualExpenses && <TripActualExpenses value={trip.actualExpenses} plannedBudget={tripPlannedBudget(trip)} employee={employee}
           canEdit={employee && (active || trip.status === 'finished')} offline={offline} busy={busy}
           error={expenseAction.error} onSave={saveActualExpenses} />}
+        {demo && trip.finance && <TripFinance trip={trip} request={request} employee={employee} onChanged={report.reload} />}
         {(report.value.tasks.length > 0 || canAttach) && <Card title="Связанные заявки" icon="clipboard">
           {report.value.tasks.length > 0 && <Text style={styles.muted}>
             Принято · {report.value.summary.completed}. На проверке · {report.value.summary.awaitingReview}.

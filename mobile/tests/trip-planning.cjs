@@ -110,8 +110,11 @@ test('city autofill and automatic visit plan survive submission, approval and re
     plannedStart: start.toISOString(), plannedEnd: end.toISOString(),
     destinations: stops.map(stop => stop.destination), visitTimes: route.map(stop => stop.plannedAt),
   } });
-  const { offer: approved } = await createDemoTrips(storage)('manager', `/trip-offers/${offer.id}/approval`, { method: 'POST', body: {
+  const { offer: checked } = await createDemoTrips(storage)('accountant', `/trip-offers/${offer.id}/approval`, { method: 'POST', body: {
     stage: 1, action: 'approve', expectedRevision: offer.revision,
+  } });
+  const { offer: approved } = await createDemoTrips(storage)('manager', `/trip-offers/${offer.id}/approval`, { method: 'POST', body: {
+    stage: 2, action: 'approve', expectedRevision: checked.revision,
   } });
   const { trip } = await createDemoTrips(storage)('employee', `/trips/${approved.tripId}/report`);
   assert.deepEqual(plain(trip.stops.map(stop => stop.destination)), plain(stops.map(stop => stop.destination)));

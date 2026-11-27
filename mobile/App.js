@@ -9,6 +9,7 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import AuthScreens from './src/AuthScreens';
 import DemoEntry, { DemoRoleSwitch } from './src/DemoEntry';
 import { createDemoTrips } from './src/demoTrips';
+import AccountantScreen, { accountantDemoTabs } from './src/AccountantScreen';
 import OfficeScreens from './src/OfficeScreens';
 import ContractsScreen from './src/ContractsScreen';
 import EmployeeDashboard from './src/EmployeeDashboard';
@@ -31,6 +32,7 @@ const DEMO_ONLY = process.env.EXPO_PUBLIC_QWORK_DEMO_ONLY === '1';
 const demoTrips = createDemoTrips(AsyncStorage);
 const employeeDemoTrips = (path, options) => demoTrips('employee', path, options);
 const managerDemoTrips = (path, options) => demoTrips('manager', path, options);
+const accountantDemoTrips = (path, options) => demoTrips('accountant', path, options);
 const INVITATION_KEY = 'qwork.company-link.v1';
 const QUICK_ACCESS_ONLINE_TIMEOUT_MS = 70000;
 const SAMPLE_STAFF = [
@@ -80,6 +82,7 @@ async function locateArrival() {
 const roles = [
   ['employee', 'Задачи', 'Сотрудник', '▤'],
   ['manager', 'Задачи', 'Руководитель', '⊞'],
+  ['accountant', 'Договоры', 'Бухгалтер', '▤'],
 ];
 const accountantTabs = [['contracts', 'Договоры', 'clipboard'], ['profile', 'Профиль', 'user']];
 const labels = {
@@ -185,7 +188,7 @@ function Profile({ session, role, onSignOut, onDemoRole, onTasks, onShifts, onQu
   const initials = name.split(/\s+/).slice(0, 2).map(part => part[0]).join('').toUpperCase();
   const accountant = role === 'accountant';
   const roleLabel = accountant ? 'Бухгалтер' : roles.find(([key]) => key === role)?.[2];
-  const workLabel = accountant ? 'Договоры' : role === 'employee' ? 'Мои задачи' : 'Работы компании';
+  const workLabel = accountant ? (DEMO_ONLY && !session ? 'Кабинет бухгалтера' : 'Договоры') : role === 'employee' ? 'Мои задачи' : 'Работы компании';
   return (
     <ScrollView contentContainerStyle={styles.content}>
       <View style={styles.pageIntro}><Text style={styles.pageTitle}>Мой профиль</Text><Text style={styles.muted}>Рабочее пространство и доступ</Text></View>
@@ -217,7 +220,7 @@ function Profile({ session, role, onSignOut, onDemoRole, onTasks, onShifts, onQu
         </Pressable>}
       </View>
       {session && <EmailSettings user={session.user} request={request} />}
-      {!session && <View style={styles.profileMenu}><Text style={styles.demoCaption}>ПОСМОТРЕТЬ ДРУГУЮ РОЛЬ</Text>{roles.map(([key,, label]) => (
+      {!session && <View style={styles.profileMenu}><Text style={styles.demoCaption}>ПОСМОТРЕТЬ ДРУГУЮ РОЛЬ</Text>{roles.filter(([key]) => DEMO_ONLY || key !== 'accountant').map(([key,, label]) => (
         <Pressable key={key} accessibilityRole="button" onPress={() => onDemoRole(key)} style={styles.profileRow}><Text style={styles.profileRowLabel}>{label}</Text><Icon name={role === key ? 'check' : 'chevron-right'} size={18} /></Pressable>
       ))}</View>}
       <Pressable accessibilityRole="button" onPress={onSignOut} style={styles.signOut}>
@@ -351,7 +354,7 @@ function Workspace() {
   }, [demoTasks, storageAvailable]);
 
   useEffect(() => {
-    const homePage = accountant ? 'contracts' : 'home';
+    const homePage = accountant ? (DEMO_ONLY && !session ? 'accounting' : 'contracts') : 'home';
     if (selectedId === null && page === homePage) return;
     const back = BackHandler.addEventListener('hardwareBackPress', () => {
       if (selectedId !== null) setSelectedId(null);
@@ -360,7 +363,7 @@ function Workspace() {
       return true;
     });
     return () => back.remove();
-  }, [selectedId, page, tripRoute, accountant]);
+  }, [selectedId, page, tripRoute, accountant, session]);
 
   useEffect(() => {
     if (!session) return;
@@ -489,7 +492,7 @@ function Workspace() {
     setSelectedId(null);
     setShowShifts(false);
     setTripRoute(null);
-    setPage(nextRole === 'accountant' ? 'contracts' : 'home');
+    setPage(nextRole === 'accountant' ? (DEMO_ONLY && !sessionRef.current ? 'accounting' : 'contracts') : 'home');
     setRole(nextRole);
   }
 
@@ -920,9 +923,11 @@ function Workspace() {
             {page === 'profile' ? (
               <Profile session={session} role={role} request={request} onSignOut={signOut} onDemoRole={switchRole} push={push}
                 onQuickAccess={() => setSetupSession(session)}
-                onTasks={() => navigate(accountant ? 'contracts' : 'tasks')} onShifts={() => navigate('shifts')} />
+                onTasks={() => navigate(accountant ? (DEMO_ONLY && !session ? 'accounting' : 'contracts') : 'tasks')} onShifts={() => navigate('shifts')} />
             ) : accountant ? (
-              <AccountantContracts request={request} />
+              DEMO_ONLY && !session
+                ? <AccountantScreen key={page} request={accountantDemoTrips} section={page} onSectionChange={navigate} />
+                : <AccountantContracts request={request} />
             ) : role === 'employee' && page === 'home' ? (
               <EmployeeDashboard key={session?.user.id ?? 'demo'} tasks={tasks ?? []} name={session?.user.name}
                 onSelect={openEmployeeTask} request={isEmployeeSession ? request : undefined} offline={showOfflineIcon}
@@ -995,7 +1000,7 @@ function Workspace() {
           </View>
           <SafeAreaView edges={['bottom']} style={styles.bottomSafe}>
             <View style={styles.roles}>
-              {(accountant ? accountantTabs : [
+              {(accountant ? (DEMO_ONLY && !session ? accountantDemoTabs : accountantTabs) : [
                 ['home', 'Главная', 'home'],
                 ['tasks', 'Задачи', 'clipboard'],
                 ...(role === 'employee'
@@ -1003,7 +1008,7 @@ function Workspace() {
                   : [['field-operations', 'Выезды', 'briefcase'], ['analytics', 'Аналитика', 'chart']]),
                 ['profile', 'Профиль', 'user'],
               ]).map(([key, label, icon]) => {
-                const active = page === key || (key === 'home' && ['team','planning','operations','contracts'].includes(page));
+                const active = page === key || (!accountant && key === 'home' && ['team','planning','operations','contracts'].includes(page));
                 return (
                   <Pressable key={key} accessibilityRole="tab" accessibilityLabel={label}
                     accessibilityState={{selected:active}} onPress={() => navigate(key)} style={styles.role}>

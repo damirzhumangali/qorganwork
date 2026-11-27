@@ -40,7 +40,7 @@ function offerEntry(offer, employee, canDispatch, open) {
     const rejected = offer.status === 'rejected';
     const stages = offer.approvalStages ?? [];
     const pending = stages.find(stage => stage.status === 'waiting');
-    const action = draft && employee ? 'Заполнить черновик'
+    const action = draft && employee ? (offer.revisionReason ? 'Исправить заявку' : 'Заполнить черновик')
       : !employee && offer.status === 'awaiting_approval' && offer.canDecideApproval ? 'Рассмотреть командировку' : '';
     return {
       key: `offer-${offer.id}`, kind: 'trips', icon: 'briefcase', ...tripPlace(offer.destination, offer.stops),
@@ -50,7 +50,7 @@ function offerEntry(offer, employee, canDispatch, open) {
         ? [...new Set([offer.scheduleFrom, offer.scheduleTo])].filter(Boolean)
           .map(day => dateOnly.format(new Date(day))).join(' — ')
         : period(offer.plannedStart, offer.plannedEnd), amount: offer.estimate?.total,
-      status: draft ? 'Черновик' : rejected ? 'Отклонена'
+      status: draft ? (offer.revisionReason ? 'На уточнении' : 'Черновик') : rejected ? 'Отклонена'
         : pending ? `Согласование · ${pending.position} из ${stages.length}` : 'На согласовании',
       action, open, bucket: rejected ? 'history' : action ? 'action' : 'waiting',
       time: time(offer.updatedAt ?? offer.proposedAt ?? offer.createdAt),

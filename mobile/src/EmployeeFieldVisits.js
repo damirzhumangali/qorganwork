@@ -16,7 +16,7 @@ export default function EmployeeFieldVisits({ demo = false, request, offline = f
       <Text accessibilityRole="header" style={styles.title}>Выезды</Text>
       <Text style={styles.description}>Задания на объектах и командировки</Text>
     </View>
-    {demo && <Text style={styles.description}>Демо · командировки сохраняются в этом браузере. Для согласования переключитесь на руководителя.</Text>}
+    {demo && <Text style={styles.description}>Демо · командировки сохраняются в этом браузере. Расходы проверяет бухгалтер, затем поездку согласует руководитель.</Text>}
     <EmployeeTrips demo={demo} request={request} offline={offline} tasks={tasks} onTask={onTask}
       initialView={initialView ?? (fromTrips ? 'trips' : 'all')} initialTripId={initialTripId}
       initialOfferId={initialOfferId} initialRequestId={initialRequestId} />

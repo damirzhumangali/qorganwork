@@ -31,9 +31,15 @@ const draft = {
   dailyRate: 10000, transport: 5000, lodging: 12000,
 };
 const post = (api, role, url, body = {}) => api(role, url, { method: 'POST', body });
-const approve = (api, offer) => post(api, 'manager', `/trip-offers/${offer.id}/approval`, {
+const checkExpenses = (api, offer) => post(api, 'accountant', `/trip-offers/${offer.id}/approval`, {
   stage: 1, action: 'approve', expectedRevision: offer.revision,
 });
+const approve = async (api, offer) => {
+  const { offer: checked } = await checkExpenses(api, offer);
+  return post(api, 'manager', `/trip-offers/${offer.id}/approval`, {
+    stage: 2, action: 'approve', expectedRevision: checked.revision,
+  });
+};
 
 test('employee creates locally; reloaded manager approves; employee starts and finishes', async () => {
   const env = environment();
@@ -46,7 +52,8 @@ test('employee creates locally; reloaded manager approves; employee starts and f
   api = env.reload();
   const list = await api('manager', '/trip-offers');
   assert.equal(list.offers[0].id, offer.id);
-  assert.equal(list.offers[0].canDecideApproval, true);
+  assert.equal(list.offers[0].canDecideApproval, false);
+  assert.equal((await api('accountant', '/trip-offers')).offers[0].canDecideApproval, true);
   const { offer: approved } = await approve(api, offer);
   assert.equal(approved.status, 'confirmed');
   api = env.reload();
@@ -81,11 +88,12 @@ test('rejection and reason persist for employee without creating a trip', async 
   const env = environment(); const api = env.reload();
   const { offer } = await post(api, 'employee', '/trip-offers', draft);
   const url = `/trip-offers/${offer.id}/approval`;
-  await assert.rejects(post(api, 'manager', url, { stage: 1, action: 'reject', expectedRevision: 1 }), /причину/);
-  await post(api, 'manager', url, { stage: 1, action: 'reject', reason: 'Перенести дату', expectedRevision: 1 });
+  const { offer: checked } = await checkExpenses(api, offer);
+  await assert.rejects(post(api, 'manager', url, { stage: 2, action: 'reject', expectedRevision: checked.revision }), /причину/);
+  await post(api, 'manager', url, { stage: 2, action: 'reject', reason: 'Перенести дату', expectedRevision: checked.revision });
   const { offers } = await env.reload()('employee', '/trip-offers');
   assert.equal(offers[0].status, 'rejected');
-  assert.equal(offers[0].approvalStages[0].reason, 'Перенести дату');
+  assert.equal(offers[0].approvalStages[1].reason, 'Перенести дату');
   assert.equal((await api('employee', '/trips')).trips.length, 0);
 });
 
