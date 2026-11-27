@@ -8,6 +8,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import AuthScreens from './src/AuthScreens';
 import DemoEntry, { DemoRoleSwitch } from './src/DemoEntry';
+import { createDemoTrips } from './src/demoTrips';
 import OfficeScreens from './src/OfficeScreens';
 import ContractsScreen from './src/ContractsScreen';
 import EmployeeDashboard from './src/EmployeeDashboard';
@@ -27,6 +28,9 @@ import QuickAccess, { clearQuickAccess, readQuickAccess, quickAccessSupported } 
 
 const STORAGE_KEY = 'qwork.tasks.v1';
 const DEMO_ONLY = process.env.EXPO_PUBLIC_QWORK_DEMO_ONLY === '1';
+const demoTrips = createDemoTrips(AsyncStorage);
+const employeeDemoTrips = (path, options) => demoTrips('employee', path, options);
+const managerDemoTrips = (path, options) => demoTrips('manager', path, options);
 const INVITATION_KEY = 'qwork.company-link.v1';
 const QUICK_ACCESS_ONLINE_TIMEOUT_MS = 70000;
 const SAMPLE_STAFF = [
@@ -928,7 +932,8 @@ function Workspace() {
                 <Pressable onPress={DEMO_ONLY ? () => navigate('tasks') : signOut} accessibilityRole="button" style={styles.demoEnter}><Text style={styles.demoEnterText}>{DEMO_ONLY ? 'Открыть задачи' : 'Войти в аккаунт'}</Text></Pressable>
               </View>
             ) : role === 'employee' && page === 'trips' && !selected ? (
-              <EmployeeFieldVisits key={navigationId} request={session ? request : undefined}
+              <EmployeeFieldVisits key={navigationId} request={session ? request : DEMO_ONLY ? employeeDemoTrips : undefined}
+                demo={DEMO_ONLY && !session}
                 offline={offlineMode || Boolean(networkError)} tasks={tasks ?? []} onTask={openEmployeeTask}
                 initialView={tripRoute?.view} initialTripId={tripRoute?.tripId}
                 initialRequestId={tripRoute?.requestId} initialOfferId={tripRoute?.offerId}
@@ -969,6 +974,7 @@ function Workspace() {
                 objects={objects}
                 onCreateObject={createObject}
                 request={request}
+                demoTripRequest={DEMO_ONLY && !session ? managerDemoTrips : undefined}
                 imageSource={imageSource}
                 onUploadPhoto={uploadPhoto}
                 onPhotoRejected={response => applyServerTask(response?.task)}

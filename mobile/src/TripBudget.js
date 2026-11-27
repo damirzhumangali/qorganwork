@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { colors } from './ui';
+import { tripBudgetDays, tripBudgetTotals } from './tripBudgetCalculation';
+export { tripBudgetDays, tripBudgetTotals } from './tripBudgetCalculation';
 
 const rateField = ['dailyRate', 'Ставка за день'];
 const expenseFields = [
@@ -10,9 +12,6 @@ const expenseFields = [
   ['other', 'Прочие расходы'],
 ];
 const fields = [rateField, ...expenseFields];
-const companyDay = new Intl.DateTimeFormat('en-CA', {
-  timeZone: 'Asia/Almaty', year: 'numeric', month: '2-digit', day: '2-digit',
-});
 const tenge = new Intl.NumberFormat('ru-KZ', { style: 'currency', currency: 'KZT', maximumFractionDigits: 0 });
 
 export function tripBudgetDraft(value) {
@@ -28,26 +27,6 @@ export function tripBudgetPayload(draft) {
     budget[key] = Number(raw);
   }
   return budget;
-}
-
-function dayNumber(value) {
-  const parts = Object.fromEntries(companyDay.formatToParts(value).map(({ type, value: part }) => [type, Number(part)]));
-  return Date.UTC(parts.year, parts.month - 1, parts.day) / 86_400_000;
-}
-
-export function tripBudgetDays(start, end) {
-  const first = start ? new Date(start) : null;
-  const last = end ? new Date(end) : null;
-  return first && last && Number.isFinite(+first) && Number.isFinite(+last) && last > first
-    ? dayNumber(last) - dayNumber(first) + 1 : 0;
-}
-
-export function tripBudgetTotals(budget, start, end) {
-  const days = tripBudgetDays(start, end);
-  const dailyRate = budget?.dailyRate ?? 0;
-  const workTotal = dailyRate * days;
-  const expensesTotal = expenseFields.reduce((sum, [key]) => sum + (budget?.[key] ?? 0), 0);
-  return { days, dailyRate, workTotal, expensesTotal, total: workTotal + expensesTotal };
 }
 
 function amount(value) {

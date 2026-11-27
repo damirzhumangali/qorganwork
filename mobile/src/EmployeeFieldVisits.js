@@ -3,7 +3,7 @@ import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-n
 import { EmployeeTrips } from './FieldOperations';
 import { colors, Icon } from './ui';
 
-export default function EmployeeFieldVisits({ request, offline = false, tasks = [], onTask,
+export default function EmployeeFieldVisits({ demo = false, request, offline = false, tasks = [], onTask,
   initialView, initialTripId, initialRequestId, initialOfferId, onBackToShifts }) {
   const fromTrips = onBackToShifts || initialTripId || initialRequestId || initialOfferId;
   return <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled"
@@ -16,7 +16,8 @@ export default function EmployeeFieldVisits({ request, offline = false, tasks = 
       <Text accessibilityRole="header" style={styles.title}>Выезды</Text>
       <Text style={styles.description}>Задания на объектах и командировки</Text>
     </View>
-    <EmployeeTrips request={request} offline={offline} tasks={tasks} onTask={onTask}
+    {demo && <Text style={styles.description}>Демо · командировки сохраняются в этом браузере. Для согласования переключитесь на руководителя.</Text>}
+    <EmployeeTrips demo={demo} request={request} offline={offline} tasks={tasks} onTask={onTask}
       initialView={initialView ?? (fromTrips ? 'trips' : 'all')} initialTripId={initialTripId}
       initialOfferId={initialOfferId} initialRequestId={initialRequestId} />
   </ScrollView>;

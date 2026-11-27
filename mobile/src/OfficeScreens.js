@@ -1155,7 +1155,7 @@ function StaffDirectory({ employees, onRenew, onEditDepartment, onResetPassword,
 export default function OfficeScreens({
   role = 'manager', tasks, setTasks, session, employees = [], onCreateTask, onUpdateTask, onCreateEmployee,
   onCancelTask, onRepeatTask, onRenewInvite, onSetDepartment, onResetPassword, objects = [], onCreateObject,
-  request, imageSource, onUploadPhoto, onPhotoRejected, onImportedTasks, sampleStaff,
+  request, demoTripRequest, imageSource, onUploadPhoto, onPhotoRejected, onImportedTasks, sampleStaff,
   section = 'home', onSectionChange, navigationId = 0, offline = false,
 }) {
   const [creating, setCreating] = useState(section === 'home' ? 'overview' : section === 'tasks' ? null : section);
@@ -1396,7 +1396,7 @@ export default function OfficeScreens({
           <RequestError message={error} />
         </>}
 
-        {!server && ['team', 'operations', 'planning', 'analytics', 'field-operations'].includes(creating) && <View style={styles.emptyCard}><Icon name="shield" size={30} color={colors.blue} /><Text style={styles.label}>Данные компании</Text><Text style={styles.muted}>В демо-режиме доступны создание заявок и проверка результатов. Этот раздел требует данных компании.</Text><Button onPress={() => openForm(null)} secondary>К демонстрационным заявкам</Button></View>}
+        {!server && !(demoTripRequest && fieldOperations) && ['team', 'operations', 'planning', 'analytics', 'field-operations'].includes(creating) && <View style={styles.emptyCard}><Icon name="shield" size={30} color={colors.blue} /><Text style={styles.label}>Данные компании</Text><Text style={styles.muted}>В демо-режиме доступны создание заявок и проверка результатов. Этот раздел требует данных компании.</Text><Button onPress={() => openForm(null)} secondary>К демонстрационным заявкам</Button></View>}
 
         {selected && (
           <>
@@ -1477,16 +1477,19 @@ export default function OfficeScreens({
           </>
         )}
 
-        {fieldOperations && !selected && server && request && (
-          <OfficeFieldOperations request={request} tasks={tasks} objects={objects} employees={assignees}
-            initialTripId={visitTripId} initialTab={visitTab} onTabChange={setVisitTab}
-            onTask={(id, options) => openTask(String(id), options)}
-            sampleStaff={canManageStaff && sampleStaff ? {
-              names: sampleStaff.names, busy, error, onAdd: () => submit(sampleStaff.onAdd),
-            } : undefined}
-            onCreateTask={() => openForm('field-task')} />
+        {fieldOperations && !selected && (server ? request : demoTripRequest) && (
+          <View style={{ gap: 12 }}>
+            {!server && <Text style={styles.muted}>Демо · здесь видны командировки, созданные сотрудником в этом браузере.</Text>}
+            <OfficeFieldOperations request={server ? request : demoTripRequest} demo={!server} tasks={tasks} objects={objects} employees={assignees}
+              initialTripId={visitTripId} initialTab={visitTab} onTabChange={setVisitTab}
+              onTask={(id, options) => openTask(String(id), options)}
+              sampleStaff={canManageStaff && sampleStaff ? {
+                names: sampleStaff.names, busy, error, onAdd: () => submit(sampleStaff.onAdd),
+              } : undefined}
+              onCreateTask={() => openForm('field-task')} />
+          </View>
         )}
-        {fieldOperations && !server && !selected && (
+        {fieldOperations && !server && !demoTripRequest && !selected && (
           <View style={styles.emptyCard}>
             <Icon name="briefcase" size={28} />
             <Text style={styles.cardTitle}>Выезды компании</Text>

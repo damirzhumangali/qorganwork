@@ -803,7 +803,7 @@ export function EmployeeTripInbox({ request, offline, onOpen }) {
   </Card>;
 }
 
-function TripReport({ id, request, offline, employee, canEditBudget, onTask, onBack, onChange, tasks, offer }) {
+function TripReport({ demo = false, id, request, offline, employee, canEditBudget, onTask, onBack, onChange, tasks, offer }) {
   const report = useResource(request, `/trips/${encodeURIComponent(id)}/report`, offline);
   const action = useAction();
   const stopAction = useAction();
@@ -818,7 +818,7 @@ function TripReport({ id, request, offline, employee, canEditBudget, onTask, onB
   const busy = action.busy || stopAction.busy || expenseAction.busy;
   const canEditCalculation = !trip?.selfRequested && (employee ? !trip?.offerId : canEditBudget);
   const available = trip ? eligibleTripTasks(tasks, trip.employeeId) : [];
-  const canAttach = !employee && trip?.status !== 'finished' && (available.length > 0 || editingTasks);
+  const canAttach = !demo && !employee && trip?.status !== 'finished' && (available.length > 0 || editingTasks);
   const ownBudget = employee ? trip?.estimate : trip?.budget;
   const budgetPayload = budgetDraft ? tripBudgetPayload(budgetDraft) : null;
   const budgetTitle = employee ? 'Мой расчёт' : 'План руководителя';
@@ -942,7 +942,7 @@ function TripReport({ id, request, offline, employee, canEditBudget, onTask, onB
   );
 }
 
-function TripsPanel({ request, employee = false, tasks = [], offline = false, onTask,
+function TripsPanel({ request, demo = false, employee = false, tasks = [], offline = false, onTask,
   id, setId, initialOfferId = null, initialRequestId = null, canEditBudget = false, canDispatch = false,
   filter, onFilter, onControl, onCreateTask, sampleStaff, employees = [] }) {
   const list = useResource(request, '/trips', offline);
@@ -999,7 +999,7 @@ function TripsPanel({ request, employee = false, tasks = [], offline = false, on
     setOfferId(null);
     setId(next);
   }
-  if (id) return <TripReport key={id} id={id} request={request} employee={employee} offline={offline}
+  if (id) return <TripReport demo={demo} key={id} id={id} request={request} employee={employee} offline={offline}
     canEditBudget={canEditBudget} onTask={onTask && ((taskId, options) => onTask(taskId, { ...options, view: filter }))}
     onBack={() => setId(null)} onChange={refresh} tasks={tasks}
     offer={allOffers.find(offer => offer.tripId && String(offer.tripId) === String(id))} />;
@@ -1080,7 +1080,7 @@ function TripsPanel({ request, employee = false, tasks = [], offline = false, on
         onFilter('trips');
         setImporting(true);
       } : undefined} importTripDisabled={offline}
-      onSetupApproval={!employee && selfService ? () => setConfiguring(true) : undefined}
+      onSetupApproval={!demo && !employee && selfService ? () => setConfiguring(true) : undefined}
       onControl={onControl} />
     {!employee && sampleStaff && <Card title="Тестовая команда" icon="users">
       <Text style={styles.muted}>{sampleStaff.names.join(' · ')}</Text>
@@ -1092,18 +1092,18 @@ function TripsPanel({ request, employee = false, tasks = [], offline = false, on
   </View>;
 }
 
-export function EmployeeTrips({ request, offline = false, onTask, tasks = [], initialTripId = null,
+export function EmployeeTrips({ demo = false, request, offline = false, onTask, tasks = [], initialTripId = null,
   initialRequestId = null, initialOfferId = null, initialView = 'all' }) {
   const [id, setId] = useState(initialTripId);
   const [filter, setFilter] = useState(initialView);
-  return <TripsPanel employee request={request} offline={offline} id={id} setId={setId} onTask={onTask}
+  return <TripsPanel demo={demo} employee request={request} offline={offline} id={id} setId={setId} onTask={onTask}
     tasks={tasks} filter={filter} onFilter={setFilter} initialOfferId={initialOfferId} initialRequestId={initialRequestId} />;
 }
 
-export function OfficeFieldOperations({ request, tasks = [], employees = [],
+export function OfficeFieldOperations({ demo = false, request, tasks = [], employees = [],
   onTask, onCreateTask, initialTab = 'all', initialTripId = null, onTabChange, sampleStaff }) {
   const [filter, setFilter] = useState(initialTab === 'board' ? 'all' : initialTab);
-  const [control, setControl] = useState(initialTab === 'board' && !initialTripId);
+  const [control, setControl] = useState(!demo && initialTab === 'board' && !initialTripId);
   const [id, setId] = useState(initialTripId);
   const board = useResource(request, '/field-control', !control);
   function selectFilter(next) {
@@ -1120,9 +1120,10 @@ export function OfficeFieldOperations({ request, tasks = [], employees = [],
       : !board.error ? <Text style={styles.muted}>Загружаем выездные работы…</Text> : null}
   </View>;
 
-  return <TripsPanel request={request} tasks={tasks} id={id} setId={setId} onTask={onTask} canEditBudget canDispatch
-    filter={filter} onFilter={selectFilter} sampleStaff={sampleStaff} onCreateTask={onCreateTask} employees={employees}
-    onControl={() => { setControl(true); onTabChange?.('board'); }} />;
+  return <TripsPanel demo={demo} request={request} tasks={tasks} id={id} setId={setId} onTask={onTask} canEditBudget canDispatch
+    filter={filter} onFilter={selectFilter} sampleStaff={demo ? undefined : sampleStaff}
+    onCreateTask={demo ? undefined : onCreateTask} employees={employees}
+    onControl={demo ? undefined : () => { setControl(true); onTabChange?.('board'); }} />;
 }
 
 const styles = StyleSheet.create({
