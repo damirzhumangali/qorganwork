@@ -17,12 +17,22 @@ function view(document, state) {
   return { ...document, paid, outstanding: document.kind === 'advance' ? Math.max(0, document.content.amount - paid) : 0,
     outdated: document.kind === 'report' && document.source !== reportSource(trip) };
 }
-function advanceAllowed(document, state) {
-  const trip = state.trips.find(t => t.id === document.tripId);
-  check(trip && ['planned', 'active'].includes(trip.status), 'Аванс доступен для согласованной незавершённой поездки.');
-  check(document.content.amount <= accountingTrip(trip).finance.remainingAdvance, 'Остаток аванса изменился. Исправьте сумму заявления.');
-  check(!(state.documents ?? []).some(d => d.id !== document.id && d.kind === 'advance' && d.tripId === trip.id
+export function advanceSubmissionIssue(trip, amount) {
+  if (!trip || !['planned', 'active'].includes(trip.status)) return 'Новый аванс доступен только для согласованной незавершённой поездки.';
+  const finance = accountingTrip(trip).finance;
+  if (amount <= finance.remainingAdvance) return null;
+  if (!trip.estimate?.expensesTotal) return 'В плане поездки не указаны расходы на аванс. Согласуйте их с бухгалтером перед отправкой заявления.';
+  if (finance.remainingAdvance === 0) return 'Плановые расходы уже покрыты авансом. Уточните у бухгалтера расходы и отмеченные выдачи перед новым заявлением.';
+  return 'Сумма заявления больше доступного остатка. Уменьшите сумму или уточните расходы и выдачи с бухгалтером.';
+}
+function uniqueAdvance(document, state) {
+  check(!(state.documents ?? []).some(d => d.id !== document.id && d.kind === 'advance' && d.tripId === document.tripId
     && view(d, state).outstanding > 0), 'Для этой поездки уже есть незакрытое заявление. Откройте его в списке.');
+}
+function advanceAllowed(document, state) {
+  const issue = advanceSubmissionIssue(state.trips.find(t => t.id === document.tripId), document.content.amount);
+  check(!issue, issue);
+  uniqueAdvance(document, state);
 }
 function contentFor(kind, trip, body, now) {
   const base = { company: 'Демо-компания', employee: trip.employeeName, destination: trip.destination, purpose: trip.purpose,
@@ -47,7 +57,10 @@ function makeDocument({ state, kind, trip, body, now, nextId }) {
   const document = { id: nextId(), kind, tripId: trip.id, employeeId: trip.employeeId, sample: Boolean(trip.sample),
     revision: 1, version: 1, status: 'draft', content: contentFor(kind, trip, body, now),
     source: kind === 'report' ? reportSource(trip) : null, signatures: [], versions: [], history: [], operations: [], createdAt: now(), updatedAt: now() };
-  if (kind === 'advance') advanceAllowed(document, state);
+  if (kind === 'advance') {
+    check(['planned', 'active'].includes(trip.status), 'Выберите согласованную незавершённую поездку.');
+    uniqueAdvance(document, state);
+  }
   document.history.push({ action: 'Создан черновик', role: owner(document), name: names[owner(document)], at: now(), version: 1 });
   return document;
 }
@@ -106,7 +119,9 @@ export async function handleDemoDocuments({ state, role, path, method, body, now
     if (action === 'update') {
       check(role === owner(document), 'Исправления вносит автор документа.');
       const content = contentFor(document.kind, trip, body, now);
-      if (document.kind === 'advance') advanceAllowed({ ...document, content }, state);
+      // Draft corrections never issue money or authorize another advance.
+      // Recheck the live balance only when submitting or accepting the statement.
+      if (document.kind === 'advance') uniqueAdvance(document, state);
       document.versions.push({ version: document.version, content: clone(document.content), signatures: clone(document.signatures), status: document.status, source: document.source });
       document.version++; document.content = content; document.status = 'draft'; document.signatures = []; document.returnReason = null;
       document.source = document.kind === 'report' ? reportSource(trip) : null;

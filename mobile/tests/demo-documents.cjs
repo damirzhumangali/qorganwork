@@ -32,7 +32,7 @@ test('advance autofills from an approved trip; no registration, other role or ex
   assert.ok(doc.content.plannedStart); assert.ok(doc.content.purpose);
   await assert.rejects(post(api, 'accountant', '/documents', { kind: 'advance', tripId: doc.tripId }), /другая роль/);
   await assert.rejects(post(api, 'employee', '/documents', { kind: 'advance', tripId: doc.tripId }), /уже есть/);
-  await assert.rejects(change(api, 'employee', doc, 'update', { amount: 45001 }), /Остаток/);
+  await assert.rejects(change(api, 'employee', doc, 'update', { amount: 0 }), /положительную/);
   await assert.rejects(change(api, 'employee', doc, 'send'), /учебное/);
   await assert.rejects(change(api, 'accountant', doc, 'approve'), /Дождитесь/);
   await assert.rejects(api('manager', '/documents'), /сотруднику и бухгалтеру/);
@@ -120,4 +120,32 @@ test('stale revisions and failed writes cannot lose signatures; examples are add
   const signed = await change(api, 'employee', doc, 'sign', { confirmDemo: true });
   await assert.rejects(change(api, 'accountant', doc, 'update'), /изменился/);
   assert.equal(signed.signatures.length, 1);
+});
+test('exhausted advance does not block saving a corrected draft; submitting and accepting still check the current balance', async () => {
+  const env = environment(); const api = env.api(); let doc = await statement(api);
+  doc = await change(api, 'employee', doc, 'send', { confirmDemo: true });
+  const trip = (await api('accountant', '/trips')).trips.find(t => t.id === doc.tripId);
+  await post(api, 'accountant', `/accounting/trips/${trip.id}/transactions`, {
+    kind: 'advance', amount: 45000, date: '2026-11-27', expectedRevision: trip.finance.revision,
+  });
+  await assert.rejects(change(api, 'accountant', doc, 'approve'), /уже покрыты авансом/);
+  doc = await change(api, 'accountant', doc, 'return', { reason: 'Проверить уже выданный аванс' });
+  doc = await change(api, 'employee', doc, 'update', { amount: 10000, note: 'Сохраняю для уточнения' });
+  assert.equal(doc.status, 'draft'); assert.equal(doc.content.amount, 10000);
+  assert.equal(doc.signatures.length, 0); assert.equal(doc.versions[0].signatures.length, 1);
+  const reloaded = (await env.api()('employee', '/documents')).documents.find(d => d.id === doc.id);
+  assert.equal(reloaded.content.note, 'Сохраняю для уточнения');
+  await assert.rejects(change(api, 'employee', doc, 'send', { confirmDemo: true }), /уже покрыты авансом/);
+  const unchanged = (await api('accountant', '/trips')).trips.find(t => t.id === doc.tripId);
+  assert.equal(unchanged.finance.remainingAdvance, 0); assert.equal(unchanged.finance.advanceTotal, 45000);
+  assert.equal(unchanged.finance.transactions.length, 1);
+});
+test('an over-budget draft can be saved, corrected and sent, without creating an approval or a payment on save', async () => {
+  const api = environment().api(); let doc = await statement(api, 50000);
+  assert.equal(doc.status, 'draft'); assert.equal(doc.content.amount, 50000);
+  await assert.rejects(change(api, 'employee', doc, 'send', { confirmDemo: true }), /больше доступного остатка/);
+  doc = await change(api, 'employee', doc, 'update', { amount: 10000 });
+  doc = await change(api, 'employee', doc, 'send', { confirmDemo: true });
+  doc = await change(api, 'accountant', doc, 'approve');
+  assert.equal(doc.status, 'approved'); assert.equal(doc.paid, 0);
 });

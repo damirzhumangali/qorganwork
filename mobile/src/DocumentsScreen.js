@@ -4,7 +4,7 @@ import { randomUUID } from 'expo-crypto';
 import { colors, Icon } from './ui';
 import { financeDate as date, financeMoney as money, ReceiptGallery } from './TripFinance';
 import { TransactionForm } from './AccountantScreen';
-import { documentTitles, documentStatuses } from './demoDocuments';
+import { advanceSubmissionIssue, documentTitles, documentStatuses } from './demoDocuments';
 
 function Button({ children, onPress, primary, disabled }) {
   return <Pressable accessibilityRole="button" accessibilityState={{ disabled: Boolean(disabled) }} disabled={disabled} onPress={onPress}
@@ -27,6 +27,16 @@ function TripInfo({ trip }) {
     <Fact label="Цель поездки">{trip.purpose}</Fact>
   </>;
 }
+function AdvanceBudget({ trip, issue, draft = false }) {
+  return <View style={s.budget}>
+    <View style={s.line}><Text style={s.muted}>Расходы по плану</Text><Text style={s.label}>{money(trip.estimate.expensesTotal)}</Text></View>
+    <View style={s.line}><Text style={s.muted}>Уже выдано авансом</Text><Text style={s.label}>{money(trip.finance.advanceTotal)}</Text></View>
+    <View style={s.line}><Text style={s.label}>Доступно на расходы</Text><Text style={s.label}>{money(trip.finance.remainingAdvance)}</Text></View>
+    <Text style={s.muted}>Оплата работы в аванс не входит.</Text>
+    {issue && <Text accessibilityRole="alert" style={s.warning}>{issue}</Text>}
+    {draft && <Text style={s.muted}>{issue ? 'Черновик можно сохранить с этой суммой. Подписание и отправка пока недоступны.' : 'Сначала сохраните черновик и проверьте его. Подписание и отправка — отдельный шаг.'}</Text>}
+  </View>;
+}
 function Editor({ kind, document, data, busy, onSave, onCancel }) {
   const trips = data.trips.filter(t => kind === 'advance'
     ? ['planned', 'active'].includes(t.status) && t.finance.remainingAdvance > 0
@@ -37,12 +47,14 @@ function Editor({ kind, document, data, busy, onSave, onCancel }) {
   const [amount, setAmount] = useState(String(document?.content.amount ?? trip?.finance.remainingAdvance ?? ''));
   const [note, setNote] = useState(document?.content.note ?? '');
   const [details, setDetails] = useState(document?.content.details ?? '');
-  const valid = trip && (kind !== 'advance' || /^\d{1,9}$/.test(amount) && Number(amount) > 0 && Number(amount) <= trip.finance.remainingAdvance)
+  const amountValid = /^\d{1,9}$/.test(amount) && Number(amount) > 0;
+  const advanceIssue = kind === 'advance' && trip && amountValid ? advanceSubmissionIssue(trip, Number(amount)) : null;
+  const valid = trip && (kind !== 'advance' || amountValid)
     && (kind !== 'writeoff' || details.trim().length > 0);
   return <>
     <Button disabled={busy} onPress={onCancel}>‹ Отмена</Button>
     <Card><Text accessibilityRole="header" style={s.section}>{document ? 'Исправить документ' : documentTitles[kind]}</Text>
-      <Text style={s.muted}>{kind === 'advance' ? 'Выберите согласованную поездку. Основные поля заполнятся автоматически.'
+      <Text style={s.muted}>{kind === 'advance' ? document ? 'Измените сумму или комментарий и сохраните черновик. Данные поездки уже заполнены.' : 'Выберите согласованную поездку. Основные поля заполнятся автоматически.'
         : 'Учебный шаблон для демонстрации. Документ из 1С пока не загружается.'}</Text>
       {!document && <>
         <Text style={s.label}>Командировка</Text>
@@ -60,7 +72,8 @@ function Editor({ kind, document, data, busy, onSave, onCancel }) {
         {kind === 'advance' && <>
           <Text style={s.label}>Прошу выдать, ₸</Text>
           <TextInput accessibilityLabel="Сумма заявления в тенге" value={amount} onChangeText={setAmount} keyboardType="number-pad" maxLength={9} editable={!busy} style={s.input} />
-          <Text style={s.muted}>Осталось на расходы: {money(trip.finance.remainingAdvance)}. Оплата работы в аванс не входит.</Text>
+          {!amountValid && <Text accessibilityRole="alert" style={s.warning}>Укажите положительную сумму в целых тенге, до 9 цифр.</Text>}
+          <AdvanceBudget trip={trip} issue={advanceIssue} draft />
         </>}
         {kind === 'report' && <Fact label="Фактические расходы">{money(trip.actualExpenses.expensesTotal)}</Fact>}
         {kind === 'writeoff' && <>
@@ -107,6 +120,7 @@ function Details({ document: d, trip, role, busy, onAction, onEdit, onPayment, o
   const [confirm, setConfirm] = useState(false); const [returning, setReturning] = useState(false);
   const [reason, setReason] = useState(''); const [pay, setPay] = useState(false); const [oldVersion, setOldVersion] = useState(null);
   const author = d.kind === 'advance' ? 'employee' : 'accountant';
+  const advanceIssue = d.kind === 'advance' && !isDone(d) ? advanceSubmissionIssue(trip, d.content.amount) : null;
   const signable = role === 'employee' && (d.kind === 'advance' && d.status === 'draft' || d.status === 'awaiting_employee')
     || role === 'accountant' && d.status === 'awaiting_accountant_signature';
   const returnable = role === 'employee' && d.status === 'awaiting_employee'
@@ -117,6 +131,7 @@ function Details({ document: d, trip, role, busy, onAction, onEdit, onPayment, o
       <Text style={s.muted}>{d.kind === 'advance' ? 'Сотрудник → проверка бухгалтером → отметка выдачи' : 'Бухгалтер готовит → сотрудник подписывает → бухгалтер подписывает'}</Text>
       {d.returnReason && <Text style={s.warning}>Замечание: {d.returnReason}</Text>}
       {d.outdated && <Text style={s.warning}>{isDone(d) ? 'После подписания данные поездки изменились. Здесь сохранена подписанная версия.' : 'Расходы или чеки изменились. Бухгалтеру нужно обновить документ перед подписанием.'}</Text>}
+      {advanceIssue && <AdvanceBudget trip={trip} issue={advanceIssue} />}
     </Card>
     <Preview document={d} />
     {d.kind === 'report' && trip?.receipts.length > 0 && <Card><Text style={s.label}>Фото приложений к этой версии</Text>
@@ -131,11 +146,11 @@ function Details({ document: d, trip, role, busy, onAction, onEdit, onPayment, o
       {d.status === 'returned' && d.signatures.length > 0 && <Text style={s.warning}>Документ возвращён. Сохранённые подписи относятся только к показанной версии.</Text>}
       {confirm ? <View style={s.confirm}>
         <Text style={s.label}>Учебное подписание</Text><Text style={s.body}>Вы подписываете версию {d.version} от роли «{role === 'employee' ? 'Сотрудник' : 'Бухгалтер'}». Это демонстрация, а не ЭЦП. Ключ и пароль не требуются.</Text>
-        <Button primary disabled={busy || d.outdated} onPress={() => action(d.kind === 'advance' ? 'send' : 'sign', { confirmDemo: true })}>Подтвердить учебную подпись</Button>
+        <Button primary disabled={busy || d.outdated || Boolean(advanceIssue)} onPress={() => action(d.kind === 'advance' ? 'send' : 'sign', { confirmDemo: true })}>Подтвердить учебную подпись</Button>
         <Button disabled={busy} onPress={() => setConfirm(false)}>Отмена</Button>
-      </View> : signable && <Button primary disabled={busy || d.outdated} onPress={() => setConfirm(true)}>{d.kind === 'advance' ? 'Подписать в демо и отправить' : 'Подписать в демо'}</Button>}
+      </View> : signable && <Button primary disabled={busy || d.outdated || Boolean(advanceIssue)} onPress={() => setConfirm(true)}>{d.kind === 'advance' ? 'Подписать в демо и отправить' : 'Подписать в демо'}</Button>}
       {role === 'accountant' && d.kind !== 'advance' && d.status === 'draft' && <Button primary disabled={busy || d.outdated} onPress={() => action('send')}>Отправить сотруднику</Button>}
-      {role === 'accountant' && d.status === 'awaiting_accountant' && <Button primary disabled={busy} onPress={() => action('approve')}>Принять заявление</Button>}
+      {role === 'accountant' && d.status === 'awaiting_accountant' && <Button primary disabled={busy || Boolean(advanceIssue)} onPress={() => action('approve')}>Принять заявление</Button>}
       {returning ? <>
         <TextInput accessibilityLabel="Причина возврата документа" placeholder="Что нужно исправить" value={reason} onChangeText={setReason} editable={!busy} multiline maxLength={1000} style={[s.input, s.multiline]} />
         <Button disabled={busy || !reason.trim()} onPress={() => action('return', { reason })}>Отправить замечание</Button>
@@ -250,6 +265,7 @@ const s = StyleSheet.create({
   multiline: { minHeight: 84, textAlignVertical: 'top' }, fact: { gap: 4 }, choice: { gap: 6, padding: 13, borderWidth: 1, borderColor: colors.border, borderRadius: 12 },
   choiceActive: { borderColor: colors.blue, backgroundColor: colors.tint }, paper: { backgroundColor: '#fff', padding: 20, borderRadius: 6, borderWidth: 1, borderColor: '#D9E2EE', gap: 16 },
   rule: { height: 1, backgroundColor: colors.border }, amount: { fontSize: 29, fontWeight: '800', color: '#174BB9' },
+  budget: { backgroundColor: colors.canvas, borderRadius: 12, padding: 12, gap: 10 },
   line: { flexDirection: 'row', justifyContent: 'space-between', gap: 10 }, signature: { flexDirection: 'row', gap: 10, padding: 12, borderRadius: 12, backgroundColor: '#EAF8F0' },
   confirm: { backgroundColor: '#EAF4FF', padding: 14, borderRadius: 14, gap: 12 }, history: { borderLeftWidth: 2, borderColor: '#C6D9F3', paddingLeft: 12, paddingVertical: 5, gap: 5 },
   filters: { flexDirection: 'row', backgroundColor: '#E8EEF7', padding: 4, borderRadius: 12, gap: 3 }, filter: { paddingVertical: 12, flex: 1, alignItems: 'center', borderRadius: 9 },
