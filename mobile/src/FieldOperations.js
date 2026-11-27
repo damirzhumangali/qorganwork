@@ -14,6 +14,9 @@ import { TripActualExpenses } from './TripActualExpenses';
 import { TripApprovalProgress, TripApprovalReview, TripApprovalSettings } from './TripApprovals';
 import TripImport from './TripImport';
 import TripScheduleImport from './TripScheduleImport';
+import { SCHEDULE_DESTINATIONS } from './TripScheduleCatalog';
+import { cityDestinationIds, tripCityOptions, tripDestinationCatalog, defaultTripPeriod, planTripVisits, DEFAULT_TRIP_PURPOSE, recentTripRate } from './tripPlanning';
+import TripPeriodPicker from './TripPeriodPicker';
 
 export const TASK_STATUS = {
   assigned: 'Назначена', unassigned: 'Без исполнителя', accepted: 'Принята сотрудником',
@@ -338,6 +341,7 @@ export function VisitOptionPicker({ label, icon, options, selected, onSelect, di
       {filtered.slice(0, visibleLimit).map(option => {
         const checked = multiple ? selected.includes(option.id) : selected === option.id;
         return <Pressable key={option.id} accessibilityRole={multiple ? 'checkbox' : 'radio'}
+          aria-checked={checked}
           accessibilityState={{ checked, disabled }} disabled={disabled}
           onPress={() => {
             if (multiple) onSelect(checked ? selected.filter(id => id !== option.id) : [...selected, option.id]);
@@ -366,21 +370,23 @@ function shiftVisits(visits, offset) {
 }
 
 function TripForm({ request, objects = [], onCreated, onCancel, offline = false,
-  companyOrganizations = [], onAddOrganization, previousTrip, contracts = [], destinationsError = '',
+  companyOrganizations = [], onAddOrganization, previousTrip, suggestedDailyRate = null, contracts = [], destinationsError = '',
   loadingCapabilities = false, capabilitiesError = '', approvalSettings = null, approvalSettingsError = '' }) {
   const [objectId, setObjectId] = useState(null);
-  const [placeSource, setPlaceSource] = useState(() => contracts.length ? 'contract' : 'organizations');
+  const [placeSource, setPlaceSource] = useState('organizations');
   const [contractId, setContractId] = useState(() => contracts.length === 1 ? String(contracts[0].id) : null);
   const [organizations, setOrganizations] = useState([]);
   const [addingOrganization, setAddingOrganization] = useState(false);
   const [newOrganization, setNewOrganization] = useState('');
   const [cityName, setCityName] = useState('');
   const [destination, setDestination] = useState('');
-  const [purpose, setPurpose] = useState('');
+  const [purpose, setPurpose] = useState(DEFAULT_TRIP_PURPOSE);
   const [comment, setComment] = useState('');
-  const [start, setStart] = useState(null);
-  const [end, setEnd] = useState(null);
-  const [budgetDraft, setBudgetDraft] = useState(() => tripBudgetDraft(null));
+  const initialPeriod = useRef(defaultTripPeriod()).current;
+  const [start, setStart] = useState(initialPeriod.start);
+  const [end, setEnd] = useState(initialPeriod.end);
+  const [autoSchedule, setAutoSchedule] = useState(true);
+  const [budgetDraft, setBudgetDraft] = useState(() => tripBudgetDraft({ dailyRate: suggestedDailyRate }));
   const [visitSchedule, setVisitSchedule] = useState([]);
   const [template, setTemplate] = useState(null);
   const submission = useRef(null);
@@ -389,16 +395,16 @@ function TripForm({ request, objects = [], onCreated, onCancel, offline = false,
   const templateAction = useAction();
   const busy = action.busy || catalogAction.busy || templateAction.busy;
   const blocked = offline || loadingCapabilities || Boolean(capabilitiesError);
-  const catalog = new Map(KURMANGAZY_DESTINATIONS.map(option => [organizationKey(option.label), option]));
-  for (const { name, city, address } of companyOrganizations) {
-    const key = organizationKey(name);
-    if (!catalog.has(key)) catalog.set(key, { id: name, label: name, city, address, detail: address || city });
-  }
+  const catalog = new Map(tripDestinationCatalog([...KURMANGAZY_DESTINATIONS, ...SCHEDULE_DESTINATIONS],
+    companyOrganizations, objects).map(option => [organizationKey(option.label), option]));
   for (const name of template?.organizations ?? []) {
     const key = organizationKey(name);
     if (!catalog.has(key)) catalog.set(key, { id: name, label: name });
   }
   const organizationOptions = [...catalog.values()];
+  const cityOptions = tripCityOptions(organizationOptions);
+  const cityOrganizations = new Set(cityDestinationIds(cityName, organizationOptions));
+  const visibleOrganizations = organizationOptions.filter(option => cityOrganizations.has(option.id) || organizations.includes(option.id));
   const atLimit = organizations.length >= MAX_TRIP_ORGANIZATIONS;
   const canAddOrganization = Boolean(onAddOrganization && !blocked && !busy && !atLimit);
   const selectedObject = objects.find(object => String(object.id) === objectId);
@@ -437,7 +443,7 @@ function TripForm({ request, objects = [], onCreated, onCancel, offline = false,
   const needsManualCity = !routeStops.length || routeStops.some(stop => !stop.automaticCity);
   const placeTooLong = routeStops.some(stop => Array.from(stop.destination).length > 300);
   const stopsById = new Map(routeStops.map(stop => [stop.id, stop]));
-  const route = visitSchedule.filter(stop => stopsById.has(stop.id));
+  const route = autoSchedule ? planTripVisits(routeStops, start, end) : visitSchedule.filter(stop => stopsById.has(stop.id));
   for (const stop of routeStops) {
     if (!route.some(item => item.id === stop.id)) route.push({ id: stop.id, plannedAt: null });
   }
@@ -459,7 +465,7 @@ function TripForm({ request, objects = [], onCreated, onCancel, offline = false,
   const approvedRoute = approvalSettings?.configured === true && !approvalSettingsError;
   const approvalStages = approvalSettings?.configured || !approvalSettings?.supportsSingleApprover
     ? approvalSettings?.stages ?? [] : [];
-  const ready = !blocked && !busy && !placeTooLong && !(placeSource === 'organizations' && addingOrganization)
+  const ready = !blocked && !busy && !placeTooLong && !(placeSource === 'organizations' && (organizations.length > MAX_TRIP_ORGANIZATIONS || addingOrganization))
     && Boolean(place && purpose.trim() && approvedRoute && validPeriod && budget?.dailyRate != null
       && validTripRoute(route, routeStops, plannedStart, plannedEnd));
 
@@ -473,16 +479,24 @@ function TripForm({ request, objects = [], onCreated, onCancel, offline = false,
       : source.visitSchedule.map(stop => ({ ...stop, plannedAt: null })));
   }
 
-  function changeStart(value) {
-    setStart(value);
-    if (!template) return;
-    if (!start) {
-      applyTemplateDates(template, value);
-      return;
+  function changePeriod(value) {
+    if (!autoSchedule && start && value.start) {
+      const offset = +value.start - +start;
+      if (offset) setVisitSchedule(current => shiftVisits(current, offset));
     }
-    const offset = +value - +start;
-    setEnd(current => current ? new Date(+current + offset) : current);
-    setVisitSchedule(current => shiftVisits(current, offset));
+    setStart(value.start);
+    setEnd(value.end);
+  }
+
+  function chooseCity(value) {
+    setCityName(value);
+    setOrganizations(cityDestinationIds(value, organizationOptions));
+    setObjectId(null);
+    setDestination('');
+    setTemplate(null);
+    setVisitSchedule([]);
+    setAutoSchedule(true);
+    closeOrganizationEditor();
   }
 
   function fillFromPrevious() {
@@ -491,6 +505,7 @@ function TripForm({ request, objects = [], onCreated, onCancel, offline = false,
       const { trip } = await request(`/trips/${encodeURIComponent(previousTrip.id)}/report`);
       const draft = tripFormTemplate(trip, objects, organizationOptions, contracts);
       setTemplate(draft);
+      setAutoSchedule(false);
       setPlaceSource(draft.placeSource);
       if (draft.contractId) setContractId(draft.contractId);
       setCityName(draft.cityName);
@@ -505,6 +520,7 @@ function TripForm({ request, objects = [], onCreated, onCancel, offline = false,
 
   function chooseContract(value) {
     setContractId(value);
+    setAutoSchedule(true);
     setTemplate(null);
   }
 
@@ -589,19 +605,27 @@ function TripForm({ request, objects = [], onCreated, onCancel, offline = false,
           <View style={styles.choices}>
             <Button disabled={busy} onPress={() => setPlaceSource('organizations')}>Указать другое место</Button>
           </View>
-        </> : <>
-          <Text style={styles.muted}>{placeSource === 'manual'
-            ? 'Укажите место поездки и населённый пункт.'
-            : 'Выберите организацию или объект — населённый пункт подставится по адресу.'}</Text>
-          <Text style={styles.label}>Организации и объекты</Text>
-        </>}
+        </> : placeSource === 'organizations' ? <>
+          <Text style={styles.label}>Город / населённый пункт</Text>
+          <Text style={styles.muted}>Выберите город — связанные организации и объекты отметятся автоматически.</Text>
+          <VisitOptionPicker label="Выбрать город" icon="pin" options={cityOptions}
+            selected={cityName || undefined} onSelect={chooseCity} disabled={busy} visibleLimit={cityOptions.length} />
+        </> : <Text style={styles.label}>Организация или объект</Text>}
         <Notice message={destinationsError} />
         {placeSource === 'organizations' && <>
-          <VisitOptionPicker label="Выбрать организации" icon="building"
-            options={organizationOptions} selected={organizations}
-            onSelect={value => { if (value.length <= MAX_TRIP_ORGANIZATIONS) setOrganizations(value); }}
-            disabled={busy} visibleLimit={50} />
-          <Text style={styles.muted}>{organizationOptions.length} организаций</Text>
+          <VisitOptionPicker key={cityName} label="Выбрать организации" icon="building"
+            options={visibleOrganizations} selected={organizations}
+            onSelect={value => { if (value.length <= MAX_TRIP_ORGANIZATIONS || value.length < organizations.length) setOrganizations(value); }}
+            disabled={busy || !cityName && !organizations.length} visibleLimit={50}
+            empty="Для этого города пока нет организаций с подтверждённым местоположением." />
+          {cityName && <Text style={styles.muted} accessibilityLiveRegion="polite">{cityOrganizations.size
+            ? `В городе найдено: ${cityOrganizations.size}. Выбрано: ${organizations.length}. Уберите места, которые не нужно посещать.`
+            : 'В графике нет однозначной привязки объектов к этому городу. Можно указать объект вручную.'}</Text>}
+          {cityOrganizations.size > 0 && <View style={styles.choices}>
+            <Button disabled={busy} onPress={() => setOrganizations([...cityOrganizations])}>Выбрать все в городе</Button>
+            <Button disabled={busy || !organizations.length} onPress={() => setOrganizations([])}>Снять выбор</Button>
+          </View>}
+          <Text style={styles.muted}>Список дополнен по графику командировок за 2026 год.</Text>
           {onAddOrganization && (addingOrganization ? <View style={styles.inset}>
             <Field label="Название организации" value={newOrganization} onChange={setNewOrganization} limit={300}
               disabled={busy} placeholder="Введите полное название" />
@@ -633,7 +657,7 @@ function TripForm({ request, objects = [], onCreated, onCancel, offline = false,
           options={objects.map(object => ({ id: String(object.id), label: object.name, detail: object.address }))} />}
         {placeSource === 'manual' && <Field label="Объект или адрес" value={destination} onChange={setDestination} limit={300}
           disabled={busy} placeholder="Укажите место поездки" />}
-        {placeSource !== 'contract' && <>
+        {placeSource !== 'contract' && placeSource !== 'organizations' && <>
           {automaticCities.length > 0 && <View style={styles.inset} accessibilityLiveRegion="polite">
             <Text style={styles.label}>{automaticCities.length === 1 ? 'Населённый пункт' : 'Населённые пункты'}</Text>
             <Text style={styles.body}>{automaticCities.join(' · ')}</Text>
@@ -662,21 +686,24 @@ function TripForm({ request, objects = [], onCreated, onCancel, offline = false,
         {placeTooLong && <Text style={styles.warning}>Город и название объекта вместе должны быть не длиннее 300 символов.</Text>}
       </Card>
       <Card title="Задание поездки" icon="clipboard">
+        <Text style={styles.muted}>Предложено обслуживание оборудования. Измените, если планируются другие работы.</Text>
+        <View style={styles.choices}>{[['Обслуживание', DEFAULT_TRIP_PURPOSE], ['Монтаж', 'Монтаж и настройка оборудования'],
+          ['Ремонт', 'Диагностика и устранение неисправностей']].map(([title, value]) =>
+          <Button key={title} disabled={busy} selected={purpose === value} onPress={() => setPurpose(value)}>{title}</Button>)}</View>
         <Field label="Что нужно сделать" value={purpose} onChange={setPurpose} limit={1000} disabled={busy}
           placeholder="Например, проверить и настроить оборудование" multiline />
         <Field label="Комментарий · необязательно" value={comment} onChange={setComment} limit={1000}
           disabled={busy} placeholder="Контакты на месте или важные детали" multiline />
       </Card>
       <Card title="Период командировки" icon="calendar">
-        <DeadlinePicker label="Начало поездки" value={start} onChange={changeStart} required showQuick={false}
-          showHelper={false} disabled={busy} />
-        <DeadlinePicker label="Окончание поездки" value={end} onChange={setEnd} required showQuick={false}
-          showHelper={false} suggestedDate={start ?? undefined} minimumDate={start ?? undefined} disabled={busy} />
+        <TripPeriodPicker start={start} end={end} onChange={changePeriod} disabled={busy} />
         {plannedStart && plannedEnd && !validPeriod && <Text style={styles.warning}>Окончание должно быть позже начала.</Text>}
       </Card>
-      <TripRouteEditor stops={routeStops} value={route} onChange={setVisitSchedule}
+      <TripRouteEditor stops={routeStops} value={route} onChange={value => { setAutoSchedule(false); setVisitSchedule(value); }}
+        autoPlanned={autoSchedule} onAutoPlan={() => setAutoSchedule(true)}
         start={plannedStart} end={plannedEnd} disabled={busy} />
       <Card title="Ставка и расходы" icon="briefcase">
+        {suggestedDailyRate != null && !template && <Text style={styles.muted}>Ставка подставлена из вашей последней заявки. Проверьте её перед отправкой.</Text>}
         <Text style={styles.muted}>Укажите ставку в тенге за день. Если оплата по ставке не нужна, введите 0.</Text>
         <TripBudgetFields value={budgetDraft} onChange={setBudgetDraft} start={plannedStart} end={plannedEnd}
           disabled={busy} collapseExpenses />
@@ -1055,7 +1082,7 @@ function TripsPanel({ request, demo = false, employee = false, tasks = [], offli
   if (creating && employee) {
     const previousTrip = (list.value?.trips ?? []).filter(trip => trip.status === 'finished')
       .sort((left, right) => Date.parse(right.finishedAt) - Date.parse(left.finishedAt))[0];
-    return <NewTripForm request={request} offline={offline} previousTrip={previousTrip}
+    return <NewTripForm request={request} offline={offline} previousTrip={previousTrip} suggestedDailyRate={recentTripRate(allOffers)}
       approvalSettings={approval.value} approvalSettingsError={approval.error}
       companyOrganizations={offers.value?.organizations}
       onAddOrganization={offers.value?.supportsTripOrganizations === true ? addOrganization : undefined}

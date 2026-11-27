@@ -78,7 +78,7 @@ function StopHeading({ index, destination, multiple }) {
   </View>;
 }
 
-export function TripRouteEditor({ stops = [], value = [], onChange, start, end, disabled = false }) {
+export function TripRouteEditor({ stops = [], value = [], onChange, start, end, disabled = false, autoPlanned = false, onAutoPlan }) {
   const [openId, setOpenId] = useState(null);
   if (!stops.length) return null;
   const multiple = stops.length > 1;
@@ -107,9 +107,10 @@ export function TripRouteEditor({ stops = [], value = [], onChange, start, end, 
 
   return <View style={styles.card}>
     <Text accessibilityRole="header" style={styles.title}>{multiple ? 'Время посещения объектов' : 'Время посещения объекта'}</Text>
-    <Text style={styles.muted}>{multiple
+    <Text style={styles.muted}>{autoPlanned ? 'Предварительное время распределено автоматически. Проверьте порядок и время с учётом дороги и длительности работ.' : multiple
       ? 'Укажите дату и время каждого визита. Объекты выстроятся по времени посещения.'
       : 'Выберите дату и время визита на объект в пределах периода поездки.'}</Text>
+    {!autoPlanned && onAutoPlan && <RouteButton disabled={!canPickTime} onPress={onAutoPlan}>Распределить время автоматически</RouteButton>}
     {route.map(({ id, plannedAt }, index) => {
       const destination = assigned.get(String(id))?.destination;
       const planned = dateLabel(plannedAt);

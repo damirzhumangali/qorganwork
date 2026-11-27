@@ -54,7 +54,7 @@ export function deadlineToIso(value) {
 
 export default function DeadlinePicker({ value, onChange, disabled = false,
   label = 'Выполнить до', required = false, showQuick = true, showHelper = true, suggestedDate, minimumDate, maximumDate,
-  dateOnly = false }) {
+  dateOnly = false, timeOnly = false }) {
   const [editor, setEditor] = useState(null);
   const [draft, setDraft] = useState(null);
   const insets = useSafeAreaInsets();
@@ -88,7 +88,7 @@ export default function DeadlinePicker({ value, onChange, disabled = false,
   }
 
   function change(event, nextDate) {
-    if (Platform.OS === 'android' || Platform.OS === 'web') {
+    if (Platform.OS === 'android') {
       if (!disabled && event.type === 'set' && validDate(nextDate)) {
         onChange(mergeDeadline(draft, nextDate, editor));
       }
@@ -151,7 +151,7 @@ export default function DeadlinePicker({ value, onChange, disabled = false,
         </Pressable>
       </View>}
       <View style={styles.fields}>
-        <Pressable accessibilityRole="button" accessibilityLabel={selected
+        {!timeOnly && <Pressable accessibilityRole="button" accessibilityLabel={selected
           ? `${dateLabel}. ${selected.toLocaleDateString('ru-RU')}` : customLabel ? dateLabel : 'Выбрать дату выполнения'}
           accessibilityState={{ disabled }} disabled={disabled} onPress={() => open('date')}
           style={({ pressed }) => [styles.field, (pressed || disabled) && styles.dimmed]}>
@@ -163,7 +163,7 @@ export default function DeadlinePicker({ value, onChange, disabled = false,
               : 'Не выбрана'}</Text>
           </View>
           <Icon name="chevron-right" color={colors.muted} size={16} />
-        </Pressable>
+        </Pressable>}
         {!dateOnly && <Pressable accessibilityRole="button" accessibilityLabel={selected
           ? `${timeLabel}. ${selected.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', hour12: false })}`
           : customLabel ? timeLabel : 'Выбрать время выполнения'}
@@ -203,7 +203,13 @@ export default function DeadlinePicker({ value, onChange, disabled = false,
             </View>
           </View>
         </Modal>
-      ) : nativePicker}
+      ) : Platform.OS === 'web' && nativePicker ? <View style={{ gap: 8 }}>
+        {nativePicker}
+        <View style={styles.toolbar}>
+          <Pressable accessibilityRole="button" onPress={close} style={styles.toolbarButton}><Text style={styles.link}>Отмена</Text></Pressable>
+          <Pressable accessibilityRole="button" disabled={disabled} onPress={commit} style={styles.toolbarButton}><Text style={[styles.link, styles.done]}>Готово</Text></Pressable>
+        </View>
+      </View> : nativePicker}
     </View>
   );
 }
