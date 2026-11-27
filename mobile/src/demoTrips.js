@@ -36,14 +36,18 @@ export function createDemoTrips(storage, now = () => new Date().toISOString()) {
       state = saved ? JSON.parse(saved) : { version: 1, nextId: 1, offers: [], trips: [], organizations: [] };
       requireValue(state.version === 1 && Number.isInteger(state.nextId)
         && ['offers', 'trips', 'organizations'].every(key => Array.isArray(state[key])), 'Invalid demo data');
-    } catch {
+    } catch (failure) {
+      if (failure.code === 'demo_storage') throw failure;
       throw new Error('Не удалось прочитать демо-командировки. Обновите страницу и попробуйте снова.');
     }
     const offerView = offer => ({ ...offer, canDecideApproval: role !== 'employee' && offer.status === 'awaiting_approval'
       && offer.approvalStages?.find(stage => stage.status === 'waiting')?.approverId === `demo-${role}` });
     const save = async result => {
       try { await storage.setItem(STORAGE_KEY, JSON.stringify(state)); }
-      catch { throw new Error('Не удалось сохранить командировку в браузере. Освободите место и попробуйте снова.'); }
+      catch (failure) {
+        if (failure.code === 'demo_storage') throw failure;
+        throw new Error('Не удалось сохранить данные демо. Предыдущие записи не изменены. Попробуйте ещё раз.');
+      }
       return copy(result);
     };
     const nextId = () => String(state.nextId++);

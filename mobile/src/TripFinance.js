@@ -3,6 +3,7 @@ import { Image, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { randomUUID } from 'expo-crypto';
 import { colors, Icon } from './ui';
+import { prepareReceipt } from './receiptImage';
 
 const moneyFormat = new Intl.NumberFormat('ru-KZ', { maximumFractionDigits: 0 });
 export const financeMoney = value => value == null ? '—' : moneyFormat.format(value) + ' ₸';
@@ -28,22 +29,27 @@ export function ReceiptGallery({ receipts = [] }) {
 }
 export default function TripFinance({ trip, request, employee, onChanged }) {
   const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const lock = useRef(false);
+  const pending = useRef(null); const [canRetry, setCanRetry] = useState(false);
+  const [notice, setNotice] = useState('');
   const finance = trip.finance;
   if (!finance) return null;
   const eligible = employee && ['active', 'finished'].includes(trip.status);
-  async function attach() {
+  async function attach(retry = false) {
     if (lock.current) return;
-    lock.current = true; setBusy(true); setError('');
+    lock.current = true; setBusy(true); setError(''); setNotice('');
     try {
-      const selection = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], base64: true, quality: 0.6 });
-      if (selection.canceled) return;
-      const asset = selection.assets[0];
-      const mime = ['image/jpeg', 'image/png', 'image/webp'].includes(asset.mimeType) ? asset.mimeType : 'image/jpeg';
-      if (!asset.base64 || asset.base64.length >= 2000000) throw new Error('Для демо выберите фото чека до 1,5 МБ.');
-      await request(`/trips/${encodeURIComponent(trip.id)}/receipts`, { method: 'POST', body: {
-        requestId: randomUUID(), name: asset.fileName || 'Фото чека', data: `data:${mime};base64,${asset.base64}`,
-      } });
+      if (!retry || !pending.current) {
+        const selection = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], base64: false, quality: 1 });
+        if (selection.canceled) return;
+        pending.current = null; setCanRetry(false);
+        const asset = selection.assets[0];
+        pending.current = { requestId: randomUUID(), name: asset.fileName || 'Фото чека', data: await prepareReceipt(asset) };
+        setCanRetry(true);
+      }
+      await request(`/trips/${encodeURIComponent(trip.id)}/receipts`, { method: 'POST', body: pending.current });
+      setNotice('Фото чека сохранено. Откройте его и проверьте читаемость.');
       await onChanged();
+      pending.current = null; setCanRetry(false);
     } catch (failure) { setError(failure.message || 'Не удалось прикрепить чек.'); }
     finally { lock.current = false; setBusy(false); }
   }
@@ -59,9 +65,13 @@ export default function TripFinance({ trip, request, employee, onChanged }) {
       : finance.balance < 0 ? 'Осталось вернуть' : 'Расчёты по расходам закрыты'}{finance.balance ? ' · ' + financeMoney(Math.abs(finance.balance)) : ''}</Text>}
     <Text style={styles.label}>Фото чеков · {trip.receipts?.length ?? 0}</Text>
     <ReceiptGallery receipts={trip.receipts} />
-    {eligible && (trip.receipts?.length ?? 0) < 5 && <Pressable accessibilityRole="button" disabled={busy} onPress={attach} style={styles.button}>
+    {eligible && (trip.receipts?.length ?? 0) < 5 && <Pressable accessibilityRole="button" disabled={busy} onPress={() => attach()} style={styles.button}>
       <Icon name="upload" size={18} /><Text style={styles.link}>{busy ? 'Добавляем…' : 'Прикрепить фото чека'}</Text>
     </Pressable>}
+    {error && canRetry && <Pressable accessibilityRole="button" disabled={busy} onPress={() => attach(true)} style={styles.button}>
+      <Icon name="refresh" size={18} /><Text style={styles.link}>Повторить сохранение фото</Text>
+    </Pressable>}
+    {notice ? <Text accessibilityLiveRegion="polite" style={styles.muted}>{notice}</Text> : null}
     <Text style={styles.muted}>Демо: фото и отметки сохраняются только в этом браузере.</Text>
     {error ? <Text accessibilityRole="alert" style={styles.warning}>{error}</Text> : null}
   </View>;

@@ -9,6 +9,7 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import AuthScreens from './src/AuthScreens';
 import DemoEntry, { DemoRoleSwitch } from './src/DemoEntry';
 import { createDemoTrips } from './src/demoTrips';
+import demoTripStorage from './src/demoTripStorage';
 import DocumentsScreen from './src/DocumentsScreen';
 import AccountantScreen, { accountantDemoTabs } from './src/AccountantScreen';
 import OfficeScreens from './src/OfficeScreens';
@@ -30,7 +31,7 @@ import QuickAccess, { clearQuickAccess, readQuickAccess, quickAccessSupported } 
 
 const STORAGE_KEY = 'qwork.tasks.v1';
 const DEMO_ONLY = process.env.EXPO_PUBLIC_QWORK_DEMO_ONLY === '1';
-const demoTrips = createDemoTrips(AsyncStorage);
+const demoTrips = createDemoTrips(demoTripStorage);
 const employeeDemoTrips = (path, options) => demoTrips('employee', path, options);
 const managerDemoTrips = (path, options) => demoTrips('manager', path, options);
 const accountantDemoTrips = (path, options) => demoTrips('accountant', path, options);
